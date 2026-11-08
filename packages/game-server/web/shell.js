@@ -35,6 +35,8 @@ const state = {
 	frames: new Map(),
 	/** next game page, booted and waiting for a game id */
 	preload: null,
+	/** game frame whose connection was closed for good (shown with a take-over prompt) */
+	elsewhere: null,
 	showingMenu: false,
 };
 
@@ -221,7 +223,13 @@ window.addEventListener("message", e => {
 			if (frame?.dataset.game) setTimeout(() => reveal(frame.dataset.game), 600);
 			break;
 		case "noname:game-connect-failed":
-			toast("连接对局失败，正在重试…");
+			toast("连接对局失败，请稍后重试");
+			break;
+		case "noname:game-closed":
+			onGameClosed(frame, e.data.code);
+			break;
+		case "noname:game-error":
+			toast("游戏出现一个错误（已记录到控制台），可继续游戏", 4000);
 			break;
 		case "noname:game-reconnecting":
 			if (frame && !frame.classList.contains("pending") && e.data.attempt === 1) toast("网络波动，正在重连…", 2000);
@@ -230,6 +238,43 @@ window.addEventListener("message", e => {
 			break;
 	}
 });
+
+/** a game page lost its connection for good; never auto-reload (that can loop between tabs) */
+function onGameClosed(frame, code) {
+	if (!frame || frame.classList.contains("pending")) return;
+	if (code === 4001) {
+		// another window of this browser (same identity) took over this game
+		state.elsewhere = frame;
+		$("elsewhereTitle").textContent = "本局已在另一个窗口打开";
+		$("elsewhereText").textContent = "同一浏览器只能在一个窗口中进行对局。";
+		$("elsewhere").hidden = false;
+		return;
+	}
+	if (code === 4401) {
+		toast("身份校验失败，请刷新页面", 6000);
+		return;
+	}
+	// 4000 kicked / 4002 game closed / 4404 not in room / 4410 game gone: the room state decides what to show
+	if (state.frames.get(frame.dataset.game) === frame && state.room?.game?.id === frame.dataset.game && state.room.status === "playing") {
+		state.elsewhere = frame;
+		$("elsewhereTitle").textContent = "与对局的连接已断开";
+		$("elsewhereText").textContent = "可以尝试重新连接这局游戏。";
+		$("elsewhere").hidden = false;
+	}
+}
+
+$("takeOverBtn").onclick = () => {
+	const frame = state.elsewhere;
+	state.elsewhere = null;
+	$("elsewhere").hidden = true;
+	if (frame?.isConnected) frame.contentWindow.location.reload();
+};
+$("elsewhereLobbyBtn").onclick = () => {
+	state.elsewhere = null;
+	$("elsewhere").hidden = true;
+	state.showingMenu = true;
+	render();
+};
 
 // ---------- rendering ----------
 

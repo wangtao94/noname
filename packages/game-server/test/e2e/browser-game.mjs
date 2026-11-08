@@ -20,6 +20,7 @@ const SEATS = String(process.env.E2E_SEATS || 4);
 const RESTART = process.env.E2E_RESTART === "1";
 const KILL_OWNER = process.env.E2E_KILL_OWNER === "1";
 const DROP = process.env.E2E_DROP === "1";
+const DUP_TAB = process.env.E2E_DUP_TAB === "1";
 let drops = 0;
 const TIMEOUT = Number(process.env.E2E_TIMEOUT || 600000);
 const base = `http://127.0.0.1:${PORT}`;
@@ -167,6 +168,27 @@ for (const p of players.slice(1)) {
 	say(`p${p.i} joined`);
 }
 
+/**
+ * The same browser opens the room in a second tab while the game runs: the new tab takes over the seat,
+ * the old one must show the take-over prompt (not reload-loop), and taking over again must work.
+ */
+async function duplicateTab(p) {
+	await new Promise(r => setTimeout(r, 12000));
+	const attachesBefore = (serverLog.match(/attach /g) || []).length;
+	const dup = await p.context.newPage();
+	dup.on("dialog", d => d.accept());
+	await dup.goto(`${base}/room/${code}`);
+	say(`p${p.i}: opened a duplicate tab`);
+	await waitFor(() => p.page.isVisible("#elsewhere"), 60000, "old tab shows the opened-elsewhere prompt");
+	await new Promise(r => setTimeout(r, 15000));
+	const attaches = (serverLog.match(/attach /g) || []).length - attachesBefore;
+	say(`p${p.i}: game attaches during duplicate-tab period: ${attaches}`);
+	if (attaches > 4) return fail(`reconnect loop between tabs (${attaches} attaches)`);
+	await dup.close();
+	await p.page.click("#takeOverBtn");
+	say(`p${p.i}: took the game back in the original tab`);
+}
+
 const markShell = p => p.page.evaluate(() => (window.__e2eShellMark ??= Math.random())).catch(() => null);
 const visibleGame = p =>
 	p.page.evaluate(() => [...document.querySelectorAll("#frames iframe:not(.pending)")].map(f => f.dataset.game).pop() ?? null).catch(() => null);
@@ -192,6 +214,7 @@ async function playOneGame(label) {
 	// every player gets a game iframe
 	for (const p of players) await waitFor(async () => p.page.frames().some(f => f.url().includes("sa-room=")), 60000, `p${p.i} iframe`);
 	const killAt = KILL_OWNER && label === "first" ? Date.now() + 20000 : 0;
+	if (DUP_TAB && label === "first") await duplicateTab(players[1]);
 	let killed = false;
 	let nextDrop = Date.now() + 8000;
 	let nextReport = Date.now() + 30000;
