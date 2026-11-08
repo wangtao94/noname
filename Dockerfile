@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:24-slim AS base
+FROM node:24-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@10 --activate
@@ -36,7 +36,7 @@ COPY packages/game-server/package.json packages/game-server/pnpm-lock.yaml ./pac
 RUN pnpm install --ignore-workspace --prod --frozen-lockfile && \
     pnpm --filter noname... --filter @noname/engine-host --filter @noname/game-server install --prod --frozen-lockfile
 
-FROM node:24-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 # These large, rarely changed layers remain cached when source code changes.
 COPY --chown=node:node apps/core/audio ./apps/core/audio
