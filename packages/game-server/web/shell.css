@@ -63,3 +63,6 @@ button:disabled { opacity: 0.5; cursor: default; }
 .toast { position: fixed; left: 50%; top: calc(16px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 8px; z-index: 10; max-width: calc(100% - 32px); }
 #app.overlay { position: fixed; inset: 0; z-index: 5; overflow: auto; background: color-mix(in srgb, var(--bg) 94%, transparent); }
 .floating { z-index: 6; }
+.modal { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.45); }
+.modal .card { max-width: 520px; }
+.modal p { margin: 0; }

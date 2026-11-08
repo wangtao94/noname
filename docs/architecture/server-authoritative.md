@@ -135,3 +135,38 @@ CI：PR/推送跑 lint、测试、镜像构建；main 出 `:edge`；tag 出版�
 - **主机接入方式**：Worker 内引擎走现有"中继主机"路径（`game.onlineroom`，`lib.wsOL` + `NodeWS`），主线程扮演中继：`onconnection/onmessage/onclose` 下发给引擎，`game.send("server", ...)` 上行。不改引擎。
 - **不占座位**：引擎的 `game.me`（原房主座位）同样绑定一个远程客户端（`me.ws = client`），并设 `game.notMe = true`、`_status.auto = true`，使 `isMine()` 恒为假；各 OL 流程先判断 `isOnline()` 再判断 `game.me`（已抽查 `chooseButtonOL`、`replaceHandcardsOL`、身份局选将），远程分支生效。P1 用无头客户端做端到端验证。
 - **存储抽象**：`RoomStore`（房间元数据、座位、会话、重连消息缓冲）与 `RecordSink`（整局结束后持久化，供战绩）为接口，默认内存实现，可选 Redis；进行中的引擎状态是 Worker 内对象图，不进存储层。
+
+## 7. P1–P3 实现说明
+
+### 7.1 组件与路径
+
+| 组件 | 位置 | 说明 |
+|---|---|---|
+| 无头运行时 | `packages/engine-host/src/runtime/` | loader hooks、浏览器 shim、服务端 preload、`bootEngine()` |
+| 主机 Worker | `packages/engine-host/src/host/worker.js`、`overrides.js` | 中继主机桥接；`game.me` 也绑定远程客户端；补齐联机公共选项（出牌时限等） |
+| 服务端 | `packages/game-server/src/` | `main.ts` 入口；`rooms/`（房间、对局、Worker 池、续传 Link）；`gateway/`（`/ws` 控制面、`/ws/game` 游戏面）；`fs-api.ts`（只读文件接口）；`static/`（缓存） |
+| 大厅 Shell | `packages/game-server/web/` | 无构建的原生 JS；`/`、`/room/<房间号>` |
+| 客户端接入 | `apps/core/noname/init/server-room.js` + `mode/connect.js` 3 行分支 | `?sa-room=` 模式；`ResumableSocket` |
+
+### 7.2 与第 3 节设计的差异
+
+- **两条 WebSocket**：大厅 Shell 用 `/ws`，对局 iframe 自己连 `/ws/game`（原设计是 Shell 独占连接再 postMessage 转发）。这样客户端引擎代码几乎不用改；换局仍是换 iframe，体验不变。
+- **身份**：令牌在浏览器本地生成，`uid = sha256(token)` 前 16 位。服务端无需持久化用户表，重启后身份不变。
+- **协议包**：控制面类型暂放 `packages/game-server/src/protocol.ts`（只有一个消费者），未单独建 `packages/protocol`。
+
+### 7.3 重连（P2）
+
+- 游戏面帧格式 `"<seq>\n<payload>"`，双向编号；客户端每 2 秒发 `\u0006ack:<seq>`，服务端据此裁剪缓冲（上限 8 MB）。
+- 断线：服务端保留该座位的流 `NONAME_RECONNECT_GRACE`（默认 60 秒），期间引擎无感知；客户端指数退避重连并带 `resume=<seq>`，服务端补发缺失帧，客户端重发未确认帧。
+- 无法续传（超出缓冲、宽限期已过、页面刷新）：服务端回 `\u0006fresh`，页面重载，引擎走原有快照重连（`reinit`）。宽限期过后座位由 AI 托管，回来后解除。
+- 大厅阶段房主离线 30 秒自动转让；对局中房主与普通玩家无区别。
+
+### 7.4 换局（P3）
+
+- 每局一个 iframe（`sa-game=<对局ID>`）。结算出现时 Shell 预加载下一局页面（`sa-defer=1`：引擎启动完毕、等待对局 ID）。
+- 房主点"再来一局"：服务端从预热池取 Worker 开新局；Shell 把新对局 ID 发给预加载页，页面连上后淡入，旧局 400 ms 后销毁。旧对局 Worker 保留 60 秒后回收。
+
+### 7.5 已知问题
+
+- 游戏页首次加载会因现有 JIT Service Worker 的注册流程自刷新 1–2 次（原有行为）。
+- 个别技能把引用了外部变量的 AI 函数发给客户端执行（如 `player is not defined`），客户端报错后由出牌超时兜底。原引擎联机就有，属于 P6 范畴。

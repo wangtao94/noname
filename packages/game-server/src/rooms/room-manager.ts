@@ -269,8 +269,9 @@ export class RoomManager {
 			throw new RoomError("engine", `引擎启动失败：${(e as Error).message}`);
 		}
 		const game = new GameSession(engine, room.mode, { ...room.config }, room.members.map(m => m.uid), {
-			joinTimeoutMs: 30_000,
-			log: msg => this.log.warn({ room: room.code, msg }, "game"),
+			joinTimeoutMs: 60_000,
+			graceMs: this.config.reconnectGraceMs,
+			log: msg => this.log.info({ room: room.code, game: game.gameId.slice(0, 8), msg }, "game"),
 		});
 		game.on("status", s => {
 			if (room.game !== game) return;

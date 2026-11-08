@@ -32,6 +32,8 @@ const state = {
 	retry: 0,
 	/** gameId -> iframe */
 	frames: new Map(),
+	/** next game page, booted and waiting for a game id */
+	preload: null,
 	showingMenu: false,
 };
 
@@ -125,47 +127,105 @@ function escapeHtml(s) {
 }
 
 // ---------- game frames ----------
+// One iframe per game. While a game's result screen is shown, the next game page is preloaded
+// (booted, waiting for a game id), so "play again" swaps instantly without any page refresh.
 
-function gameUrl(gameId) {
-	const p = new URLSearchParams({ "sa-room": state.room.code, "sa-uid": state.me.uid, "sa-token": token, "sa-game": gameId });
+function gameUrl(gameId, defer = false) {
+	const p = new URLSearchParams({ "sa-room": state.room.code, "sa-uid": state.me.uid, "sa-token": token });
+	if (gameId) p.set("sa-game", gameId);
+	if (defer) p.set("sa-defer", "1");
 	return `/index.html?${p}`;
+}
+
+function newFrame(src) {
+	const frame = document.createElement("iframe");
+	frame.className = "pending";
+	frame.allow = "autoplay; fullscreen";
+	frame.src = src;
+	$("frames").appendChild(frame);
+	return frame;
+}
+
+function frameOf(source) {
+	for (const f of $("frames").querySelectorAll("iframe")) if (f.contentWindow === source) return f;
+	return null;
+}
+
+function reveal(gameId) {
+	const frame = state.frames.get(gameId);
+	if (!frame || !frame.classList.contains("pending")) return;
+	frame.classList.remove("pending");
+	clearTimeout(frame._revealTimer);
+	// drop older games once the new one is visible
+	setTimeout(() => {
+		for (const [id, f] of state.frames) {
+			if (id !== gameId) {
+				f.remove();
+				state.frames.delete(id);
+			}
+		}
+	}, 400);
+}
+
+function dropPreload() {
+	state.preload?.remove();
+	state.preload = null;
 }
 
 function syncFrames() {
 	const room = state.room;
-	const gameId = room && room.status !== "lobby" && room.game && room.members.some(m => m.uid === state.me?.uid) ? room.game.id : null;
+	const seated = room && room.members.some(m => m.uid === state.me?.uid);
+	const gameId = seated && room.status !== "lobby" && room.game ? room.game.id : null;
 	if (!gameId) {
 		for (const f of state.frames.values()) f.remove();
 		state.frames.clear();
+		dropPreload();
 		return;
 	}
-	if (state.frames.has(gameId)) return;
-	const frame = document.createElement("iframe");
-	frame.className = "pending";
-	frame.allow = "autoplay; fullscreen";
-	frame.src = gameUrl(gameId);
-	frame.dataset.game = gameId;
-	$("frames").appendChild(frame);
-	state.frames.set(gameId, frame);
-	const reveal = () => {
-		frame.classList.remove("pending");
-		// drop older games once the new one is visible
-		setTimeout(() => {
-			for (const [id, f] of state.frames) {
-				if (id !== gameId) {
-					f.remove();
-					state.frames.delete(id);
-				}
-			}
-		}, 400);
-	};
-	// the engine needs a moment after "load" to build the arena; keep the previous game on screen meanwhile
-	frame.addEventListener("load", () => setTimeout(reveal, state.frames.size > 1 ? 1500 : 0), { once: true });
+	if (!state.frames.has(gameId)) {
+		let frame;
+		if (state.preload) {
+			frame = state.preload;
+			state.preload = null;
+			frame.dataset.game = gameId;
+			if (frame._preloaded) frame.contentWindow.postMessage({ type: "noname:attach", game: gameId }, location.origin);
+		} else {
+			frame = newFrame(gameUrl(gameId));
+			frame.dataset.game = gameId;
+		}
+		state.frames.set(gameId, frame);
+		const first = state.frames.size === 1;
+		// fallback in case the page never reports back
+		frame._revealTimer = setTimeout(() => reveal(gameId), first ? 4000 : 20000);
+	}
+	// preload the next game page while this one shows its result
+	if (room.status === "ended" && !state.preload) {
+		state.preload = newFrame(gameUrl(null, true));
+	}
 }
 
 window.addEventListener("message", e => {
 	if (e.origin !== location.origin) return;
-	if (e.data?.type === "noname:game-connect-failed") toast("连接对局失败，正在重试…");
+	const frame = frameOf(e.source);
+	switch (e.data?.type) {
+		case "noname:game-preloaded":
+			if (!frame) break;
+			frame._preloaded = true;
+			// already assigned (it may also have reloaded itself): hand it the game id
+			if (frame.dataset.game) frame.contentWindow.postMessage({ type: "noname:attach", game: frame.dataset.game }, location.origin);
+			break;
+		case "noname:game-connected":
+			if (frame?.dataset.game) setTimeout(() => reveal(frame.dataset.game), 600);
+			break;
+		case "noname:game-connect-failed":
+			toast("连接对局失败，正在重试…");
+			break;
+		case "noname:game-reconnecting":
+			if (frame && !frame.classList.contains("pending") && e.data.attempt === 1) toast("网络波动，正在重连…", 2000);
+			break;
+		case "noname:game-reconnected":
+			break;
+	}
 });
 
 // ---------- rendering ----------
@@ -290,6 +350,17 @@ $("menuBtn").onclick = () => {
 	state.showingMenu = !state.showingMenu;
 	render();
 };
+
+// The game page asks for GPL consent with a blocking confirm() on first run; ask here instead
+// (same origin, same flag) so the embedded game never stops on a dialog.
+const GPL_KEY = "gplv3_noname_alerted";
+if (!storage(s => s.getItem(GPL_KEY), "true")) {
+	$("gpl").hidden = false;
+	$("gplAccept").onclick = () => {
+		storage(s => s.setItem(GPL_KEY, String(true)));
+		$("gpl").hidden = true;
+	};
+}
 
 connect();
 render();

@@ -102,3 +102,21 @@ export function defaultConfigOL(lib, mode) {
 	config.bannedcards = [];
 	return config;
 }
+
+/**
+ * Online options every mode gets; the legacy client adds them when it builds the connect start menu
+ * (ui/create/menu/startMenu.js). Without them lib.configOL.choose_timeout is undefined and
+ * Player#wait() times out immediately.
+ */
+export function ensureCommonConnectOptions(lib) {
+	const common = {
+		connect_choose_timeout: { name: "出牌时限", init: "30", item: { 10: "10秒", 15: "15秒", 30: "30秒", 60: "60秒", 90: "90秒" }, connect: true, frequent: true },
+		connect_observe: { name: "允许旁观", init: true, connect: true },
+		connect_observe_handcard: { name: "允许观看手牌", init: false, connect: true },
+		connect_mount_combine: { name: "合并坐骑栏", init: false, connect: true },
+	};
+	for (const info of Object.values(lib.mode)) {
+		if (!info?.connect) continue;
+		for (const [key, value] of Object.entries(common)) info.connect[key] ??= { ...value, item: value.item && { ...value.item } };
+	}
+}

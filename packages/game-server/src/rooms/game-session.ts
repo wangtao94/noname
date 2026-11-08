@@ -9,10 +9,8 @@ const engineHost = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const workerFile = path.join(engineHost, "host/worker.js");
 const registerFile = path.join(engineHost, "runtime/register.js");
 
-export interface GameSocket {
-	send(data: string): void;
-	close(code?: number, reason?: string): void;
-}
+import { Link, type GameSocket, type ResumeRequest } from "./link.ts";
+export type { GameSocket } from "./link.ts";
 
 type WorkerMsg =
 	| { t: "booted"; catalog: unknown[] }
@@ -91,7 +89,8 @@ export class GameSession extends EventEmitter {
 	readonly startedAt = Date.now();
 	status: GameStatus = "starting";
 	endedAt?: number;
-	readonly #sockets = new Map<string, GameSocket>();
+	/** uid -> resumable stream; present while the engine considers the user connected */
+	readonly #links = new Map<string, Link>();
 	readonly #joined = new Set<string>();
 	#beginTimer?: NodeJS.Timeout;
 
@@ -101,7 +100,7 @@ export class GameSession extends EventEmitter {
 		readonly config: Record<string, unknown>,
 		/** uids expected to take a seat */
 		readonly players: string[],
-		private readonly opts: { joinTimeoutMs: number; log: (msg: string) => void }
+		private readonly opts: { joinTimeoutMs: number; graceMs: number; log: (msg: string) => void }
 	) {
 		super();
 		engine.events.on("message", (m: WorkerMsg) => this.#onWorker(m));
@@ -120,7 +119,7 @@ export class GameSession extends EventEmitter {
 		switch (m.t) {
 			case "ready":
 				this.#setStatus("waiting");
-				for (const uid of this.#sockets.keys()) this.engine.post({ t: "open", id: uid });
+				for (const uid of this.#links.keys()) this.engine.post({ t: "open", id: uid });
 				this.#beginTimer = setTimeout(() => this.#begin(), this.opts.joinTimeoutMs);
 				break;
 			case "joined":
@@ -128,10 +127,12 @@ export class GameSession extends EventEmitter {
 				if (this.status === "waiting" && this.players.every(uid => this.#joined.has(uid))) this.#begin();
 				break;
 			case "send":
-				this.#sockets.get(m.id)?.send(m.data);
+				if (process.env.NONAME_DEBUG_GAME) this.opts.log(`-> ${m.id.slice(0, 6)} ${m.data.slice(0, 80)}`);
+				this.#links.get(m.id)?.push(m.data);
 				break;
 			case "kick":
-				this.#sockets.get(m.id)?.close(4000, "kicked");
+				this.opts.log(`engine closed client ${m.id}`);
+				this.#dropLink(m.id, 4000, "kicked");
 				break;
 			case "over":
 				this.#setStatus("over");
@@ -146,36 +147,70 @@ export class GameSession extends EventEmitter {
 		this.engine.post({ t: "begin" });
 	}
 
-	/** Attach (or re-attach) a user's game socket. */
-	attach(uid: string, socket: GameSocket) {
-		const old = this.#sockets.get(uid);
-		if (old && old !== socket) {
-			this.#sockets.delete(uid);
-			this.engine.post({ t: "close", id: uid });
-			old.close(4001, "replaced");
-		}
-		this.#sockets.set(uid, socket);
-		if (this.status !== "starting") this.engine.post({ t: "open", id: uid });
-	}
-
-	message(uid: string, socket: GameSocket, data: string) {
-		if (this.#sockets.get(uid) === socket) this.engine.post({ t: "msg", id: uid, data });
-	}
-
-	detach(uid: string, socket: GameSocket) {
-		if (this.#sockets.get(uid) !== socket) return;
-		this.#sockets.delete(uid);
+	#dropLink(uid: string, code?: number, reason?: string) {
+		const link = this.#links.get(uid);
+		if (!link) return;
+		this.#links.delete(uid);
+		if (code) link.socket?.close(code, reason);
+		link.dispose();
 		this.engine.post({ t: "close", id: uid });
 	}
 
+	/**
+	 * Attach a user's game socket. With `resume` (the client still holds its state) the stream continues
+	 * seamlessly if possible; otherwise the client is told to reload ("fresh") and reconnect from scratch,
+	 * which the engine answers with a full snapshot (reinit).
+	 */
+	attach(uid: string, socket: GameSocket, resume?: ResumeRequest) {
+		const link = this.#links.get(uid);
+		if (resume) {
+			if (link?.canResume(resume.serverSeq)) {
+				this.opts.log(`resume ${uid} from ${resume.serverSeq} (server at ${link.outSeq})`);
+				link.attach(socket, resume);
+				return;
+			}
+			this.opts.log(`cannot resume ${uid} from ${resume.serverSeq} (link ${link ? `at ${link.outSeq}` : "gone"}): fresh`);
+			socket.send("\u0006fresh");
+			socket.close(1000, "fresh");
+			return;
+		}
+		if (link) this.#dropLink(uid, 4001, "replaced");
+		this.opts.log(`attach ${uid} (fresh stream, status ${this.status})`);
+		const fresh = new Link(uid, {
+			maxBufferBytes: 8 * 1024 * 1024,
+			graceMs: this.opts.graceMs,
+			onExpire: l => {
+				if (this.#links.get(uid) === l) this.#dropLink(uid);
+			},
+		});
+		fresh.attach(socket);
+		this.#links.set(uid, fresh);
+		if (this.status !== "starting") this.engine.post({ t: "open", id: uid });
+	}
+
+	message(uid: string, socket: GameSocket, frame: string) {
+		const link = this.#links.get(uid);
+		if (!link || link.socket !== socket) return;
+		const data = link.receive(frame);
+		if (data !== undefined) {
+			if (process.env.NONAME_DEBUG_GAME) this.opts.log(`<- ${uid.slice(0, 6)} ${data.slice(0, 80)}`);
+			this.engine.post({ t: "msg", id: uid, data });
+		}
+	}
+
+	/** socket closed: the seat stays connected for the grace period, then falls back to AI */
+	detach(uid: string, socket: GameSocket) {
+		this.#links.get(uid)?.detach(socket);
+	}
+
 	isConnected(uid: string) {
-		return this.#sockets.has(uid);
+		return !!this.#links.get(uid)?.connected;
 	}
 
 	async close() {
 		clearTimeout(this.#beginTimer);
-		for (const s of this.#sockets.values()) s.close(4002, "game closed");
-		this.#sockets.clear();
+		for (const link of this.#links.values()) link.dispose();
+		this.#links.clear();
 		await this.engine.terminate();
 		this.#setStatus("closed");
 	}

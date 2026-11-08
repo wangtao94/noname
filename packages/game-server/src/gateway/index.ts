@@ -174,7 +174,9 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 		const session = rooms.findGame(code, url.searchParams.get("game") ?? undefined);
 		if (!session || session.status === "closed") return ws.close(4410, "no game");
 		const sock = { send: (d: string) => ws.readyState === ws.OPEN && ws.send(d), close: (c?: number, r?: string) => ws.close(c, r) };
-		session.attach(user.uid, sock);
+		const resumeSeq = url.searchParams.get("resume");
+		const resume = resumeSeq !== null ? { serverSeq: Number(resumeSeq) || 0, clientSeq: Number(url.searchParams.get("cseq")) || 0 } : undefined;
+		session.attach(user.uid, sock, resume);
 		ws.on("message", raw => session.message(user.uid, sock, String(raw)));
 		ws.on("close", () => session.detach(user.uid, sock));
 	});
