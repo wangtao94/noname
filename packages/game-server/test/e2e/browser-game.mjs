@@ -20,6 +20,7 @@ const SEATS = String(process.env.E2E_SEATS || 4);
 const RESTART = process.env.E2E_RESTART === "1";
 const KILL_OWNER = process.env.E2E_KILL_OWNER === "1";
 const DROP = process.env.E2E_DROP === "1";
+const DUP_TAB = process.env.E2E_DUP_TAB === "1";
 let drops = 0;
 const TIMEOUT = Number(process.env.E2E_TIMEOUT || 600000);
 const base = `http://127.0.0.1:${PORT}`;
@@ -46,7 +47,13 @@ const fail = async msg => {
 		fs.mkdirSync(shotDir, { recursive: true });
 		for (const p of players) {
 			await p.page.screenshot({ path: `${shotDir}/p${p.i}.png` }).catch(() => {});
-			say(`p${p.i} frames:`, p.page.frames().map(f => f.url().slice(0, 120)).join(" | "));
+			say(
+				`p${p.i} frames:`,
+				p.page
+					.frames()
+					.map(f => f.url().slice(0, 120))
+					.join(" | ")
+			);
 		}
 		fs.writeFileSync(`${shotDir}/server.log`, serverLog);
 	} catch {}
@@ -149,16 +156,8 @@ await waitFor(() => owner.page.isEnabled("#createBtn"), 30000, "lobby");
 await owner.page.click("#createBtn");
 const code = await waitFor(() => roomState(owner), 30000, "room created");
 say("room", code);
-// 4 seats
-await owner.page.selectOption("#options select >> nth=0", { index: 0 }).catch(() => {});
-await owner.page.evaluate(seats => {
-	const ws = [...document.querySelectorAll("#options label")].find(l => l.textContent.includes("游戏人数") || l.textContent.includes("人数"));
-	const sel = ws?.querySelector("select");
-	if (sel) {
-		sel.value = seats;
-		sel.dispatchEvent(new Event("change"));
-	}
-}, SEATS);
+// Select seats by the catalog key, independent of section order.
+await owner.page.click(`#options button[data-players="${SEATS}"]`);
 
 for (const p of players.slice(1)) {
 	await p.page.goto(`${base}/room/${code}`);
@@ -167,9 +166,29 @@ for (const p of players.slice(1)) {
 	say(`p${p.i} joined`);
 }
 
+/**
+ * The same browser opens the room in a second tab while the game runs: the new tab takes over the seat,
+ * the old one must show the take-over prompt (not reload-loop), and taking over again must work.
+ */
+async function duplicateTab(p) {
+	await new Promise(r => setTimeout(r, 12000));
+	const attachesBefore = (serverLog.match(/attach /g) || []).length;
+	const dup = await p.context.newPage();
+	dup.on("dialog", d => d.accept());
+	await dup.goto(`${base}/room/${code}`);
+	say(`p${p.i}: opened a duplicate tab`);
+	await waitFor(() => p.page.isVisible("#elsewhere"), 60000, "old tab shows the opened-elsewhere prompt");
+	await new Promise(r => setTimeout(r, 15000));
+	const attaches = (serverLog.match(/attach /g) || []).length - attachesBefore;
+	say(`p${p.i}: game attaches during duplicate-tab period: ${attaches}`);
+	if (attaches > 4) return fail(`reconnect loop between tabs (${attaches} attaches)`);
+	await dup.close();
+	await p.page.click("#takeOverBtn");
+	say(`p${p.i}: took the game back in the original tab`);
+}
+
 const markShell = p => p.page.evaluate(() => (window.__e2eShellMark ??= Math.random())).catch(() => null);
-const visibleGame = p =>
-	p.page.evaluate(() => [...document.querySelectorAll("#frames iframe:not(.pending)")].map(f => f.dataset.game).pop() ?? null).catch(() => null);
+const visibleGame = p => p.page.evaluate(() => [...document.querySelectorAll("#frames iframe:not(.pending)")].map(f => f.dataset.game).pop() ?? null).catch(() => null);
 
 async function playOneGame(label) {
 	const before = Date.now();
@@ -181,10 +200,14 @@ async function playOneGame(label) {
 	if (label !== "first") {
 		// P3: the new game must become visible without reloading the lobby page
 		const t = Date.now();
-		await waitFor(async () => {
-			const g = await visibleGame(players[1]);
-			return g && g !== prevGame;
-		}, 60000, "new game visible");
+		await waitFor(
+			async () => {
+				const g = await visibleGame(players[1]);
+				return g && g !== prevGame;
+			},
+			60000,
+			"new game visible"
+		);
 		say(`${label}: new game visible after ${((Date.now() - t) / 1000).toFixed(1)}s`);
 		const after = await Promise.all(players.map(markShell));
 		for (let i = 1; i < players.length; i++) if (after[i] !== marks[i]) return fail(`p${i} lobby page reloaded during restart`);
@@ -192,10 +215,12 @@ async function playOneGame(label) {
 	// every player gets a game iframe
 	for (const p of players) await waitFor(async () => p.page.frames().some(f => f.url().includes("sa-room=")), 60000, `p${p.i} iframe`);
 	const killAt = KILL_OWNER && label === "first" ? Date.now() + 20000 : 0;
+	if (DUP_TAB && label === "first") await duplicateTab(players[1]);
 	let killed = false;
 	let nextDrop = Date.now() + 8000;
 	let nextReport = Date.now() + 30000;
 	const checkedExtensions = new Set();
+	let checkedPanel = false;
 	await waitFor(
 		async () => {
 			for (const p of players) {
@@ -213,11 +238,28 @@ async function playOneGame(label) {
 							assert.deepEqual(loaded.extensions, EXTENSIONS);
 							assert.equal(loaded.autoImport, false);
 							if (EXTENSIONS.includes("e2etest")) assert.equal(loaded.character, true);
-						} catch (e) { return fail(`p${p.i} extensions: ${e}`); }
+						} catch (e) {
+							return fail(`p${p.i} extensions: ${e}`);
+						}
 						checkedExtensions.add(p.i);
 						say(`p${p.i} extensions verified`, JSON.stringify(loaded));
 					}
 				}
+			}
+			if (!checkedPanel && (await owner.page.locator("#menuBtn").isVisible()) && (await clientState(owner))?.players) {
+				checkedPanel = true;
+				await owner.page.locator("#menuBtn").click();
+				await owner.page.locator("#returnGame").waitFor({ state: "visible" });
+				assert.equal(await owner.page.locator("#menuBtn").textContent(), "返回对局");
+				assert.match(await owner.page.locator("#settingsNote").textContent(), /对局进行中/);
+				const fs = await import("node:fs/promises");
+				await fs.mkdir("/tmp/claude-1000/ui-shots-2", { recursive: true });
+				await owner.page.screenshot({ path: "/tmp/claude-1000/ui-shots-2/in-game-room-panel.png" });
+				await owner.page.keyboard.press("Escape");
+				assert.equal(await owner.page.locator("#app").isVisible(), false);
+				await owner.page.locator("#menuBtn").click();
+				await owner.page.locator("#app").click({ position: { x: 1, y: 1 } });
+				assert.equal(await owner.page.locator("#app").isVisible(), false);
 			}
 			if (Date.now() > nextReport) {
 				nextReport = Date.now() + 30000;

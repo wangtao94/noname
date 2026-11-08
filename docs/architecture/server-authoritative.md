@@ -80,7 +80,7 @@
 
 缓存：`index.html`/`sw.js`/清单 `no-cache`；带 hash 的打包产物 `immutable` 1 年；音频图片由 Service Worker + 资源清单（路径→hash）按 hash 缓存，无 SW 回退 `ETag + no-cache`；文本预压缩 br/gzip。
 
-CI：PR/推送跑 lint、测试、镜像构建；main 出 `:edge`；tag 出版本号与 `:latest`；amd64 + arm64；GHCR。
+CI：PR/推送跑 lint、测试、镜像构建；main 出 `:edge`；tag 出版本号与 `:latest`；仅 amd64；GHCR。
 
 ## 5. 阶段
 

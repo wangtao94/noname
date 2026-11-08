@@ -41,6 +41,21 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 		if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 	};
 
+	const watchers = new Map<WebSocket, { last: number; timer?: NodeJS.Timeout }>();
+	const pushList = (ws: WebSocket) => {
+		const watch = watchers.get(ws);
+		if (!watch || watch.timer) return;
+		const delay = Math.max(0, watch.last + 1000 - Date.now());
+		watch.timer = setTimeout(() => {
+			watch.timer = undefined;
+			watch.last = Date.now();
+			send(ws, { t: "rooms", rooms: rooms.summaries() });
+		}, delay);
+	};
+	const stopWatch = (ws: WebSocket) => {
+		clearTimeout(watchers.get(ws)?.timer);
+		watchers.delete(ws);
+	};
 	const presence = (uid: string) => rooms.setPresence(uid, controlSockets.get(uid)?.size ?? 0);
 
 	const pushRoom = (room: Room) => {
@@ -48,7 +63,10 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 		const memberIds = new Set(room.members.map(m => m.uid));
 		for (const uid of memberIds) for (const ws of controlSockets.get(uid) ?? []) send(ws, { t: "room", room: view });
 	};
-	rooms.onChange(pushRoom);
+	const unsubscribe = rooms.onChange(room => {
+		pushRoom(room);
+		for (const ws of watchers.keys()) pushList(ws);
+	});
 
 	const heartbeat = (ws: WebSocket) => {
 		let alive = true;
@@ -88,7 +106,7 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 					let set = controlSockets.get(uid);
 					if (!set) controlSockets.set(uid, (set = new Set()));
 					set.add(ws);
-					send(ws, { t: "welcome", uid, nickname: user.nickname, avatar: user.avatar, version: PROTOCOL_VERSION, serverVersion: opts.serverVersion, extensions: rooms.extensions, modes: rooms.modes });
+					send(ws, { t: "welcome", uid, nickname: user.nickname, avatar: user.avatar, version: PROTOCOL_VERSION, serverVersion: opts.serverVersion, extensions: rooms.extensions, modes: rooms.modes, packs: rooms.packs });
 					presence(uid);
 					rooms.updateProfile(user);
 					const room = rooms.roomOf(uid);
@@ -98,6 +116,14 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 				if (!user) throw new RoomError("no_hello", "请先发送 hello");
 				const u = user;
 				switch (msg.t) {
+					case "rooms.watch":
+						if (typeof msg.on !== "boolean") throw new RoomError("bad_message", "on 必须为布尔值");
+						if (!msg.on) stopWatch(ws);
+						else if (!watchers.has(ws)) {
+							watchers.set(ws, { last: Date.now() });
+							send(ws, { t: "rooms", rooms: rooms.summaries() });
+						}
+						break;
 					case "profile":
 						if (msg.nickname !== undefined) u.nickname = nickname(msg.nickname);
 						if (msg.avatar !== undefined) u.avatar = avatar(msg.avatar);
@@ -155,6 +181,7 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 		});
 
 		ws.on("close", () => {
+			stopWatch(ws);
 			if (!user) return;
 			controlSockets.get(user.uid)?.delete(ws);
 			presence(user.uid);
@@ -183,6 +210,8 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 
 	return {
 		close() {
+			unsubscribe();
+			for (const ws of watchers.keys()) stopWatch(ws);
 			for (const ws of control.clients) ws.close(1001, "server shutdown");
 			for (const ws of game.clients) ws.close(1001, "server shutdown");
 		},

@@ -37,6 +37,7 @@ function safe(v) {
 process.on("unhandledRejection", e => log("unhandledRejection", e));
 process.on("uncaughtException", e => log("uncaughtException", e));
 
+const configProbe = process.env.NONAME_CONFIG_SELFTEST === "1" ? await import("../testing/config-probe.js") : null;
 let engine;
 const pending = [];
 /** uid -> lobby profile ({ nickname, avatar }); overrides what the client reports */
@@ -96,7 +97,7 @@ engine = await bootEngine({
 });
 
 const { lib, game, _status } = engine;
-post({ t: "booted", catalog: modeCatalog(lib) });
+post({ t: "booted", catalog: modeCatalog(lib), assets: packCatalog(lib) });
 
 /** Connect-mode options of every mode that supports online play (drives the lobby's settings UI). */
 function modeCatalog(lib) {
@@ -122,12 +123,55 @@ function modeCatalog(lib) {
 				init: cfg.init,
 				item: item && typeof item === "object" ? Object.fromEntries(Object.entries(item).map(([k, v]) => [k, plain(v)])) : undefined,
 				input: cfg.input ? true : undefined,
+				frequent: !!cfg.frequent,
 				intro: typeof cfg.intro === "string" ? plain(cfg.intro) : undefined,
 			});
 		}
-		modes.push({ id, name: lib.translate[id] || info.name || id, options });
+		modes.push({ id, name: lib.translate[id] || info.name || id, options, ...(id === "identity" ? { identityTable: lib.config.mode_config.identity.identity } : {}) });
 	}
 	return modes;
+}
+
+/** Pack metadata is small; ban candidates stay on the server and are fetched on demand. */
+function packCatalog(lib) {
+	const plain = value => String(value).replace(/<[^>]*>/g, "");
+	const characterPacks = lib.connectCharacterPack.map(id => ({ id, name: plain(lib.translate[id + "_character_config"] || id), count: Object.keys(lib.characterPack[id] ?? {}).length }));
+	const cardPacks = lib.connectCardPack.map(id => ({ id, name: plain(lib.translate[id + "_card_config"] || id), count: lib.cardPackList[id]?.length ?? 0 }));
+	const candidates = (packs, contents) => packs.flatMap(({ id: pack }) => Object.keys(contents[pack] ?? {}).map(id => ({ id, name: plain(lib.translate[id] || id), pack })));
+	const defaults = defaultConfigOL(lib, "identity");
+	const baseCard = id => (id === "huosha" || id === "leisha" ? "sha" : id);
+	const details = {
+		character: Object.fromEntries(
+			characterPacks.map(({ id: pack }) => [
+				pack,
+				Object.keys(lib.characterPack[pack] ?? {}).map(id => {
+					const c = lib.character[id] ?? lib.characterPack[pack][id];
+					const path = c.img || `image/character/${id}.jpg`;
+					return {
+						id,
+						name: plain(lib.translate[id] || id),
+						image: /^(https?:|data:|\/)/.test(path) ? path : `/${path.replace(/^ext:/, "extension/")}`,
+						group: plain(lib.translate[c.group] || c.group || c[1]),
+						hp: `${c.hp ?? c[2]}/${c.maxHp ?? c[2]}${c.hujia ? ` · 护甲 ${c.hujia}` : ""}`,
+						skills: (c.skills ?? c[3] ?? []).map(skill => ({ name: plain(lib.translate[skill] || skill), description: plain(lib.translate[skill + "_info"] || "暂无说明") })),
+					};
+				}),
+			])
+		),
+		card: Object.fromEntries(
+			cardPacks.map(({ id: pack }) => [
+				pack,
+				[...new Set([...(lib.cardPack[pack] ?? []), ...(lib.cardPackList[pack] ?? []).map(c => c[2])])].map(id => ({
+					id,
+					name: plain(lib.translate[id] || id),
+					type: plain(lib.translate[lib.card[baseCard(id)]?.type] || { basic: "基本", trick: "锦囊", delay: "延时锦囊", equip: "装备" }[lib.card[baseCard(id)]?.type] || "其他"),
+					count: (lib.cardPackList[pack] ?? []).filter(c => c[2] === id).length,
+					description: plain(lib.translate[id + "_info"] || lib.translate[baseCard(id) + "_info"] || "暂无说明"),
+				})),
+			])
+		),
+	};
+	return { details, characterPacks, cardPacks, defaultCharacterPacks: defaults.characterPack, defaultCardPacks: defaults.cardPack, characters: candidates(characterPacks, lib.characterPack), cards: cardPacks.flatMap(({ id: pack }) => (lib.cardPack[pack] ?? []).map(id => ({ id, name: plain(lib.translate[id] || id), pack }))) };
 }
 
 // wait until the mode reached waitForPlayer
@@ -138,6 +182,7 @@ const readyTimer = setInterval(() => {
 			if (!lib.character.e2etest_hero || !lib.skill.e2etest_vigor) throw new Error("fixture extension character/skill missing");
 			log("extension-selftest", { character: "e2etest_hero", extensions: lib.config.extensions });
 		}
+		configProbe?.install(engine, post);
 		post({ t: "ready" });
 		for (const m of pending.splice(0)) handle(m);
 	}

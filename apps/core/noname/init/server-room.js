@@ -39,6 +39,12 @@ export function applyServerRoomConfig(lib, _status) {
 	lib.config.mode = "connect";
 	lib.config.show_splash = "off";
 	lib.config.new_tutorial = true;
+	// A blocking alert() inside the embedded game freezes the client until dismissed (and the seat
+	// then times out). Report errors to the console and as a non-blocking notice in the lobby instead.
+	window.alert = message => {
+		console.error("[noname]", message);
+		notifyShell("game-error", { message: String(message).slice(0, 300) });
+	};
 	return true;
 }
 
@@ -156,8 +162,18 @@ export class ResumableSocket {
 	#giveUp(code) {
 		clearInterval(this.ackTimer);
 		this.readyState = 3;
+		if (code === 4000) {
+			// the host dropped this seat (response timeout; the seat is now AI-controlled): reload once and
+			// reconnect through the engine's snapshot path to take the seat back
+			this.closedByUser = true;
+			notifyShell("game-reload");
+			location.reload();
+			return;
+		}
+		// Deliberately not calling the engine's onclose: it reloads the page, and for these permanent
+		// conditions (opened in another tab, kicked, game gone) a reload only reconnects and repeats.
+		// The lobby shell decides what to show instead.
 		notifyShell("game-closed", { code });
-		this.onclose?.({ target: this, code });
 	}
 
 	close() {
