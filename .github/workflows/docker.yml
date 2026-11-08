@@ -27,7 +27,7 @@ jobs:
                       type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
                       type=raw,value=sa-edge,enable=${{ github.ref == 'refs/heads/feat/server-authoritative' }}
                       type=semver,pattern={{version}}
-                      type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+                      type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
                       type=ref,event=pr
             - uses: docker/login-action@v3
               if: github.event_name != 'pull_request'
@@ -44,3 +44,80 @@ jobs:
                   labels: ${{ steps.meta.outputs.labels }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
+
+    # 版本标签：镜像推送成功后发布 GitHub Release（说明 + 固定版本号的 compose.yaml）
+    release:
+        needs: docker
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+            - name: Prepare release files
+              shell: bash
+              env:
+                  OWNER: ${{ github.repository_owner }}
+              run: |
+                  TAG="${GITHUB_REF_NAME}"
+                  VERSION="${TAG#v}"
+                  IMAGE="ghcr.io/${OWNER,,}/noname"
+                  mkdir -p out
+
+                  # compose.yaml 固定到本次版本的镜像
+                  sed "s#image: .*#image: ${IMAGE}:${VERSION}#" compose.yaml > out/compose.yaml
+                  (cd out && sha256sum compose.yaml > compose.yaml.sha256)
+
+                  # 说明：优先使用 docs/releases/<tag>.md，否则自动生成
+                  if [[ -f "docs/releases/${TAG}.md" ]]; then
+                    cp "docs/releases/${TAG}.md" out/notes.md
+                  else
+                    PREV="$(git tag -l 'v*' --sort=-v:refname | grep -vx "$TAG" | head -n 1 || true)"
+                    {
+                      echo "## 更新内容"
+                      echo
+                      if [[ -n "$PREV" ]]; then
+                        git log --no-merges --pretty='- %s' "${PREV}..${TAG}"
+                      else
+                        git log --no-merges --pretty='- %s' -n 50 "$TAG"
+                      fi
+                    } > out/notes.md
+                  fi
+
+                  cat >> out/notes.md <<EOF
+
+                  ## 部署
+
+                  镜像：\`${IMAGE}:${VERSION}\`（amd64 / arm64）
+
+                  \`\`\`sh
+                  mkdir noname && cd noname
+                  curl -fLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/compose.yaml
+                  mkdir -p data && sudo chown -R 1000:1000 data
+                  docker compose up -d
+                  \`\`\`
+
+                  升级：修改 compose.yaml 中的镜像版本后执行 \`docker compose pull && docker compose up -d\`。完整说明见 [部署文档](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/deploy.md)。
+                  EOF
+                  sed -i 's/^                  //' out/notes.md
+            - name: Publish release
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  TAG="${GITHUB_REF_NAME}"
+                  ARGS=(--title "$TAG" --notes-file out/notes.md --verify-tag)
+                  if [[ "$TAG" == *-* ]]; then
+                    ARGS+=(--prerelease --latest=false)
+                  else
+                    LATEST="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+                    [[ "$TAG" == "$LATEST" ]] && ARGS+=(--latest) || ARGS+=(--latest=false)
+                  fi
+                  if gh release view "$TAG" >/dev/null 2>&1; then
+                    gh release edit "$TAG" --notes-file out/notes.md
+                  else
+                    gh release create "$TAG" "${ARGS[@]}"
+                  fi
+                  gh release upload "$TAG" out/compose.yaml out/compose.yaml.sha256 --clobber
