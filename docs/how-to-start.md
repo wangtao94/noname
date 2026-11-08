@@ -136,11 +136,12 @@ pnpm install
 		});
     ```
     注意：若构建时有网络问题，请设置mirror或添加代理，相关操作请自行百度。
-4. **Q:** 如何在本地开启联机服务器（windows系统）？
+4. **Q:** 如何在本地开启联机服务器？
 
-    **A:** 在项目根目录执行命令，启动ws服务：
+    **A:** 联机由服务端权威的 game-server 提供（房间和对局都在服务端运行）。在项目根目录执行：
     ```bash
-    pnpm -F @noname/server dev
+    pnpm build
+    pnpm -F @noname/game-server start
     ```
-    这条命令启动ws服务，监听本地的8082端口。
-    在联机模式中，地址填写为：`localhost:8082`即可进入联机大厅。
+    浏览器打开 `http://localhost:8080` 进入联机大厅，建房后把邀请链接发给其他玩家即可。
+    服务器部署见 [deploy.md](./deploy.md)，架构说明见 [architecture/server-authoritative.md](./architecture/server-authoritative.md)。

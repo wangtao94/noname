@@ -1,4 +1,5 @@
 import { lib, game, ui, get, ai, _status } from "noname";
+import { connectServerRoom } from "../noname/init/server-room.js";
 
 export const type = "mode";
 
@@ -10,6 +11,15 @@ export default {
 	async start(event, trigger, player) {
 		const directstartmode = lib.config.directstartmode;
 		ui.create.menu(true);
+		if (_status.serverRoom) {
+			if (!game.onlineKey) {
+				game.onlineKey = localStorage.getItem(`${lib.configprefix}key`) || get.id();
+				localStorage.setItem(`${lib.configprefix}key`, game.onlineKey);
+			}
+			connectServerRoom(game, _status);
+			setTimeout(lib.init.onfree, 1000);
+			return;
+		}
 		event.textnode = ui.create.div("", "输入联机地址");
 		const createNode = () => {
 			if (event.created) {

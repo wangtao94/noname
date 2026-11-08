@@ -1,75 +1,120 @@
-<h1 align="center">无名杀</h1>
+<h1 align="center">无名杀 · 服务端联机版</h1>
 
 <p align="center">
-  <a href="https://github.com/libnoname/noname/actions/workflows/build.yml"><img alt="构建状态" src="https://img.shields.io/github/actions/workflow/status/libnoname/noname/build.yml?branch=main&style=flat-square"></a>
-  <a href="https://github.com/libnoname/noname/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/libnoname/noname?display_name=tag&style=flat-square"></a>
-  <a href="https://github.com/libnoname/noname/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/libnoname/noname/total?style=flat-square"></a>
-  <a href="https://github.com/libnoname/noname/graphs/contributors"><img alt="项目贡献者" src="https://img.shields.io/github/contributors/libnoname/noname?style=flat-square"></a>
-  <a href="./LICENSE"><img alt="许可证" src="https://img.shields.io/github/license/libnoname/noname?style=flat-square"></a>
+  基于 <a href="https://github.com/libnoname/noname">libnoname/noname</a> 的 Fork：房间和对局运行在服务端，断线自动续上，再来一局不用刷新，一条命令部署。
 </p>
 
-## 项目使用约定
+<p align="center">
+  <a href="https://github.com/wangtao94/noname/actions/workflows/docker.yml"><img alt="镜像构建" src="https://img.shields.io/github/actions/workflow/status/wangtao94/noname/docker.yml?branch=main&style=flat-square&label=docker"></a>
+  <a href="https://github.com/wangtao94/noname/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/wangtao94/noname?display_name=tag&style=flat-square"></a>
+  <a href="https://github.com/wangtao94/noname/pkgs/container/noname"><img alt="镜像" src="https://img.shields.io/badge/ghcr.io-wangtao94%2Fnoname-blue?style=flat-square"></a>
+  <a href="./LICENSE"><img alt="许可证" src="https://img.shields.io/github/license/wangtao94/noname?style=flat-square"></a>
+</p>
 
-本项目基于 GPL 3.0 协议开源，使用此项目时请遵守开源协议。  
-除此外，希望你在使用代码时已经了解以下额外说明：
+## 和上游有什么不同
 
-1. 打包、二次分发 **请保留代码出处**：<https://github.com/libnoname/noname>
-2. 请不要用于商业用途。
+上游的联机由**房主的浏览器**计算整局游戏，服务器只负责转发消息。本 Fork 把整局游戏搬到了服务端：
 
-## 快速启动
+| | 上游 | 本 Fork |
+|---|---|---|
+| 谁在计算对局 | 房主的浏览器 | 服务器（每局一个独立 Worker） |
+| 房主掉线 | 整局结束 | 不受影响，房主只是持有管理权限的普通座位 |
+| 网络波动 | 断开后需要重进房间 | 自动续传，60 秒内恢复无感知；超时由 AI 托管，回来后接管 |
+| 再来一局 | 所有人刷新页面、重新进房 | 约 1 秒切到新局，重新分配身份和洗牌，页面不刷新 |
+| 房间 | 房主客户端创建 | 服务端资源：房间号、邀请链接、房主可转让、离线自动移交 |
+| 扩展 | 各玩家本地各自开启 | 服务器统一指定，所有人加载同一份 |
+| 部署 | 需单独托管网页和中继服务 | 一个镜像、一个端口，`docker compose up -d` |
 
-### 环境要求
+武将、卡牌、模式等游戏内容与上游一致，并定期同步。单机游戏照常可玩（服务器首页的"进入单机游戏"）。
 
-> **提示：** 请参考 [本地文档](./docs/how-to-start.md) 或 [github文档](https://github.com/libnoname/noname/wiki/%E5%A6%82%E4%BD%95%E8%BF%90%E8%A1%8C%E6%97%A0%E5%90%8D%E6%9D%80%EF%BC%88%E7%A8%8B%E5%BA%8F%E5%91%98%E7%89%88%EF%BC%89) 配置环境。
+另外内置了一个插件：**开局手牌 N 组选 1**。各身份可分别设置组数，默认自动计算（基础 2 组、内奸 3 组，总量不超过牌堆的 60%）。
 
-- [Node.js](https://nodejs.org/) ^20.19.0 || >=22.12.0
-- [pnpm](https://pnpm.io/) >= 9
-- Webview: Chromium >= 91 || Safari >=16.4.0 (暂不支持Firefox)
+## 快速部署
 
-### 安装依赖
+需要 Docker 与 Docker Compose 插件：
 
-```bash
+```sh
+mkdir noname && cd noname
+curl -fLO https://raw.githubusercontent.com/wangtao94/noname/main/compose.yaml
+mkdir -p data && sudo chown -R 1000:1000 data
+docker compose up -d
+```
+
+打开 `http://服务器IP:8080`，创建房间，把邀请链接发给朋友即可。
+
+- 镜像：`ghcr.io/wangtao94/noname`，支持 amd64 / arm64，基于 Debian 12 + Node 24
+- 所有配置都有默认值，按需在 `compose.yaml` 中取消注释即可修改，完整列表见 [部署文档](./docs/deploy.md)
+- 公网部署建议放在 HTTPS 反向代理后面（文档里有 nginx 示例），浏览器才能启用离线资源缓存
+
+**资源缓存**：约 1.2 GB 的图片和音频按内容 hash 缓存在浏览器里。第二次访问几乎不消耗服务器流量；发新版时只重新下载有变化的文件。
+
+## 架构一览
+
+```
+┌──────── 浏览器 ────────┐            ┌──────────────── 服务器（Node） ────────────────┐
+│ 大厅页面               │  /ws       │ 网关：静态资源 + WebSocket（同一端口）          │
+│  ├ 建房/加入/设置       │◄─────────►│  ├ 房间管理：座位、房主、开局、再来一局          │
+│  └ 对局 iframe         │  /ws/game  │  ├ 会话：断线续传、宽限期、托管                  │
+│     原版游戏客户端      │◄─────────►│  └ 每局一个 Worker：原版引擎无头运行 + 插件       │
+└────────────────────────┘            └────────────────────────────────────────────────┘
+```
+
+设计细节、取舍和实测数据见 [docs/architecture/server-authoritative.md](./docs/architecture/server-authoritative.md)。
+
+## 本地开发
+
+环境：Node.js 24、pnpm 10（`corepack enable`）。
+
+```sh
 pnpm install
-```
 
-### 启动
-
-```bash
+# 单机开发（Vite 开发服务器）
 pnpm dev
+
+# 服务端联机
+pnpm build                          # 构建网页客户端到 dist/
+pnpm -F @noname/game-server start   # http://localhost:8080
 ```
 
----
+测试：
 
-贡献代码可阅读相关文档：
+```sh
+pnpm -F @noname/game-server test    # 服务端单元测试
+pnpm -F @noname/engine-host test    # 引擎/插件单元测试
 
-[Git 下载安装指南](https://github.com/libnoname/noname/wiki/Git%E4%B8%8B%E8%BD%BD%E5%AE%89%E8%A3%85%E6%8C%87%E5%8D%97)
+# 无头整局（不需要浏览器）
+cd packages/engine-host && node --import ./src/runtime/register.js ./src/testing/plugin-game.js
 
-[Github 桌面版客户端使用入门](https://docs.github.com/zh/desktop/overview/getting-started-with-github-desktop)
+# 浏览器端到端（需先 pnpm build；会自动启动服务器和 Chromium）
+cd packages/game-server && E2E_DROP=1 E2E_KILL_OWNER=1 E2E_RESTART=1 E2E_SPEED=vvfast node test/e2e/browser-game.mjs
+```
 
-[如何提交代码到《无名杀》Github 仓库](https://github.com/libnoname/noname/wiki/%E5%A6%82%E4%BD%95%E6%8F%90%E4%BA%A4%E4%BB%A3%E7%A0%81%E5%88%B0%E3%80%8A%E6%97%A0%E5%90%8D%E6%9D%80%E3%80%8BGithub%E4%BB%93%E5%BA%93)
+目录：
 
-[《无名杀》项目 Pull Request 提交规范](https://github.com/libnoname/noname/wiki/%E3%80%8A%E6%97%A0%E5%90%8D%E6%9D%80%E3%80%8B%E9%A1%B9%E7%9B%AE-Pull-Request-%E6%8F%90%E4%BA%A4%E8%A7%84%E8%8C%83)
+| 路径 | 内容 |
+|---|---|
+| `apps/core` | 游戏本体（与上游同步） |
+| `packages/engine-host` | 在 Node 中无头运行引擎、对局 Worker、服务端插件 |
+| `packages/game-server` | 服务端：房间、网关、静态资源、大厅页面（`web/`） |
+| `docs/` | 架构设计、部署说明 |
 
-客户端下载戳这里：
+贡献代码和使用 AI 编码助手前，请先阅读 [AGENTS.md](./AGENTS.md)。
 
-安卓： <https://github.com/nonameShijian/noname-shijian-android/releases/tag/v1.6.8>
+## 与上游同步
 
-PC:  <https://github.com/nonameShijian/noname/releases/tag/v1.75>
+本 Fork 对游戏本体（`apps/core`）的改动很少，集中在 `noname/init/server-room.js` 和几处接入点，合并上游更新一般不会冲突：
 
-网页端推荐使用 Chrome 系内核浏览器游玩，暂不支持 Firefox 浏览器
+```sh
+git remote add upstream https://github.com/libnoname/noname.git
+git fetch upstream
+git merge upstream/main
+```
 
-请尽量保证游玩的 Chrome 系浏览器或手机 Webview 的`内核版本大于等于91`
+## 使用约定
 
----
+本项目与上游一样基于 **GPL-3.0** 协议开源，使用时请遵守开源协议，并请：
 
-最近有一伙人号称是《无名杀十周年》的开发团队，宣称《无名杀十周年》“全新无名杀，比旧版拥有更多武将，兼容更多扩展”，实际上:
+1. 打包、二次分发时**保留代码出处**：本 Fork <https://github.com/wangtao94/noname>，以及原项目 <https://github.com/libnoname/noname>；
+2. 不要用于商业用途。
 
-- 《无名杀十周年》（原《无名杀清瑶版》）由无名杀 v1.9.124 修改而来，属于无名杀的一种**Fork**，并非“全新无名杀”；且《无名杀十周年》开发团队**公然违反 GPL-3.0 协议**，详情请看[这里](https://github.com/github/dmca/blob/master/2023/09/2023-09-20-noname.md)、[这里](https://tieba.baidu.com/p/8623890806)以及[这里](https://tieba.baidu.com/p/8624582238)。
-- 《无名杀十周年》至今没有更新神典韦等新机制武将，且删除了部分无名杀的原创武将，导致《无名杀十周年》的武将数量远远不及无名杀前几个版本的武将数量；不仅如此，《无名杀十周年》自分裂后的部分武将源码依然来自无名杀和其他开发者开源的代码。
-- 《无名杀十周年》兼容扩展的方式是不更新本体数据，从而导致《无名杀十周年》仍然在用 1.9.124 版本的代码，无法兼容使用 1.10 以后功能的扩展；而且《无名杀十周年》开发团队在使用**大量**GPL-3.0 开源的代码后对生成产物进行了**混淆加密**，在**违反开源精神**的同时，也导致扩展稳定性极具下降，更容易出问题。
-
-《无名杀十周年》就是彻头彻尾的骗局，《无名杀十周年》的开发团队更是一群拿无名杀吸血的骗子，虽然号称“不忘初心”，却公然对最有资格论述无名杀创作初心的无名杀创始人进行侮辱谩骂，直接违背其制定的规则和开源精神，恶劣程度远超当初在多个无名杀社群“自立”的水叶之流。
-
-先秦介子推曾言：“窃人之财，犹谓之盗，况贪天之功以为己力乎。”无名杀社区发展至今，正是因为有大量的开源代码进行参考，才能不断推陈出新。试想每个扩展开发者在成为一个扩展开发者之前，谁敢说没有大量参考社区内的源码？每个作品凝聚的都是大家的心血，而不是仅仅归属于个别人。我们相信：开放、共享、多元才是无名杀的初心，绝不是封闭、私藏与趋同。
-
-我们在此呼吁无名杀社区正确认识《无名杀十周年》开发团队的一些行为与做法，并希望《无名杀十周年》开发团队能反省迄今以来的所作所为。**自由开源**是无名杀社区的灵魂，希望各方都能够遵循这一精神。
+游戏内容归功于无名杀社区的所有贡献者，见上游的[贡献者列表](https://github.com/libnoname/noname/graphs/contributors)。上游的桌面版和安卓客户端请到上游项目获取。

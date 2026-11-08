@@ -46,6 +46,8 @@ jobs:
 
           mkdir /tmp/dist
           cp -r dist/* /tmp/dist/
+          # 预压缩副本只供 game-server 按 Accept-Encoding 协商使用，静态部署分支不需要
+          find /tmp/dist -type f \( -name '*.br' -o -name '*.gz' \) -exec sh -c '[ -f "${1%.*}" ] && rm "$1"' _ {} \;
 
           git fetch origin
           git checkout --orphan build-output

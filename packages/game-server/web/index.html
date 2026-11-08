@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>无名杀 · 联机大厅</title>
+	<link rel="stylesheet" href="/shell/shell.css" />
+</head>
+<body>
+	<div id="app">
+		<header class="topbar">
+			<div class="brand">无名杀 <span>联机</span></div>
+			<div class="profile">
+				<span class="conn" id="conn" title="连接状态"></span>
+				<input id="nickname" maxlength="12" placeholder="昵称" />
+			</div>
+		</header>
+
+		<main id="home" class="panel" hidden>
+			<section class="card">
+				<h2>创建房间</h2>
+				<label>模式 <select id="createMode"></select></label>
+				<button id="createBtn" class="primary">创建房间</button>
+			</section>
+			<section class="card">
+				<h2>加入房间</h2>
+				<input id="joinCode" inputmode="numeric" maxlength="6" placeholder="6 位房间号" />
+				<button id="joinBtn">加入</button>
+			</section>
+			<p class="muted">想自己玩？<a href="/index.html">进入单机游戏</a></p>
+		</main>
+
+		<main id="room" class="panel" hidden>
+			<section class="card">
+				<div class="room-head">
+					<h2>房间 <span id="roomCode" class="code"></span></h2>
+					<button id="copyLink" class="ghost">复制邀请链接</button>
+				</div>
+				<ul id="members" class="members"></ul>
+				<div class="actions">
+					<button id="startBtn" class="primary">开始游戏</button>
+					<button id="leaveBtn" class="ghost">离开房间</button>
+				</div>
+				<p id="roomHint" class="muted"></p>
+			</section>
+			<section class="card">
+				<h2>房间设置 <span id="settingsNote" class="muted small"></span></h2>
+				<label>模式 <select id="roomMode"></select></label>
+				<p id="serverExtensions" class="muted small"></p>
+				<div id="options" class="options"></div>
+			</section>
+		</main>
+	</div>
+
+	<div id="stage" hidden>
+		<div id="frames"></div>
+		<div id="endbar" class="endbar" hidden>
+			<span id="endText">本局结束</span>
+			<button id="againBtn" class="primary">再来一局</button>
+			<button id="backBtn">回到房间</button>
+			<button id="exitBtn" class="ghost">离开</button>
+		</div>
+		<button id="menuBtn" class="floating" title="房间">房间</button>
+	</div>
+
+	<div id="gpl" class="modal" hidden>
+		<div class="card">
+			<h2>使用前请阅读</h2>
+			<p>① 无名杀是一款基于 GPLv3 协议的开源软件。你可以在遵守 GPLv3 协议的基础上任意使用、修改并转发《无名杀》，以及所有基于《无名杀》开发的扩展。点击"同意"即代表你认可并接受 <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPLv3 协议</a>。</p>
+			<p>② 无名杀官方发布地址仅有 GitHub 仓库，其他所有的所谓"无名杀"社群均为玩家自发组织，与无名杀官方无关。</p>
+			<button id="gplAccept" class="primary">同意并继续</button>
+		</div>
+	</div>
+
+	<div id="toast" class="toast" hidden></div>
+	<script type="module" src="/shell/shell.js"></script>
+</body>
+</html>
