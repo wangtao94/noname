@@ -665,3 +665,7 @@ details .option-grid {
 	right: auto;
 	transform: translateX(-50%);
 }
+button.danger {
+	color: var(--accent);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}

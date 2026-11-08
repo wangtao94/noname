@@ -331,6 +331,7 @@ function renderRoom(room) {
 	// "ended" also needs a start button: after a reload the game frame is gone, so the in-game 再来一局 bar is not shown
 	$("startBtn").hidden = !isOwner || playing;
 	$("startBtn").textContent = room.status === "ended" ? "开始下一局" : "开始游戏";
+	$("dissolveBtn").hidden = !isOwner || playing;
 	$("roomHint").textContent = playing ? "对局进行中" : isOwner ? `${room.members.length}/${room.maxPlayers} 人，空位由 AI 补上` : "等待房主开始游戏";
 	$("serverExtensions").textContent = `服务器扩展：${state.extensions.join("、") || "无"}`;
 	$("settingsNote").textContent = playing ? "对局进行中，本局结束后可修改设置" : isOwner ? "" : "（仅房主可修改）";
@@ -758,6 +759,24 @@ $("joinBtn").onclick = () => {
 };
 $("joinCode").addEventListener("keydown", e => e.key === "Enter" && $("joinBtn").click());
 $("leaveBtn").onclick = () => send({ t: "room.leave" });
+// two-step confirm inside the page (confirm() dialogs are not used in the lobby)
+let dissolveArmed;
+$("dissolveBtn").onclick = () => {
+	const btn = $("dissolveBtn");
+	if (!dissolveArmed) {
+		btn.textContent = "确认解散？";
+		dissolveArmed = setTimeout(() => {
+			dissolveArmed = undefined;
+			btn.textContent = "解散房间";
+		}, 4000);
+		return;
+	}
+	clearTimeout(dissolveArmed);
+	dissolveArmed = undefined;
+	btn.textContent = "解散房间";
+	state.showingMenu = false;
+	send({ t: "room.dissolve" });
+};
 $("startBtn").onclick = () => send({ t: "room.start" });
 $("roomMode").onchange = e => send({ t: "room.config", mode: e.target.value });
 $("members").addEventListener("click", e => {
