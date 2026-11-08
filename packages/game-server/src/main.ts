@@ -17,6 +17,27 @@ const serverVersion = JSON.parse(await fs.readFile(path.resolve(here, "../packag
 const config = loadConfig();
 const app = Fastify({ logger: { level: config.logLevel }, trustProxy: config.trustProxy });
 
+// Validate against the engine source and admin directory before any workers boot.
+const coreRoot = path.resolve(here, "../../../apps/core");
+const installed = [];
+for (const name of config.extensions) {
+	let found = false;
+	for (const root of [coreRoot, config.dataDir]) {
+		for (const suffix of ["js", "ts"]) {
+			try {
+				const base = await fs.realpath(root);
+				const file = await fs.realpath(path.join(base, "extension", name, `extension.${suffix}`));
+				if (file.startsWith(base + path.sep) && (await fs.stat(file)).isFile()) found = true;
+			} catch { /* absent extension */ }
+		}
+	}
+	if (found) installed.push(name);
+	else app.log.warn({ extension: name }, "configured extension not found; disabled");
+}
+config.extensions = installed;
+// Loader hooks and file adapters in workers read this variable.
+process.env.NONAME_DATA_DIR = config.dataDir;
+
 const users = new MemoryUserStore();
 const records = new MemoryRecordSink();
 const rooms = new RoomManager(config, records, app.log);
@@ -43,8 +64,8 @@ app.get("/room/:code", (_req, reply) => sendShell("index.html", reply));
 app.get<{ Params: { "*": string } }>("/shell/*", (req, reply) => sendShell(req.params["*"], reply));
 
 if (config.serveWeb) {
-	registerFsApi(app, [config.webRoot, ...config.assetRoots]);
-	await registerStatic(app, { webRoot: config.webRoot, assetRoots: config.assetRoots });
+	registerFsApi(app, [config.webRoot, config.dataDir, ...config.assetRoots]);
+	await registerStatic(app, { webRoot: config.webRoot, assetRoots: [config.dataDir, ...config.assetRoots] });
 }
 
 const gateway = attachGateway({ server: app.server, rooms, users, log: app.log, serverVersion });

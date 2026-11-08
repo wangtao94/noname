@@ -5,6 +5,7 @@
 //
 // Each page answers every prompt with the client-side AI (without telling the host it is in auto mode),
 // so the host's remote-player code path is exercised.
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import { chromium } from "playwright-core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const serverDir = path.resolve(here, "../..");
+const EXTENSIONS = process.env.E2E_EXTENSIONS?.split(",").filter(Boolean);
 const PORT = Number(process.env.E2E_PORT || 18090);
 const PLAYERS = Number(process.env.E2E_PLAYERS || 3);
 const SEATS = String(process.env.E2E_SEATS || 4);
@@ -26,7 +28,7 @@ const say = (...a) => console.log(((Date.now() - t0) / 1000).toFixed(1).padStart
 
 const server = spawn(process.execPath, ["--import", "../engine-host/src/runtime/register.js", "src/main.ts"], {
 	cwd: serverDir,
-	env: { ...process.env, PORT: String(PORT), NONAME_GAME_SPEED: process.env.E2E_SPEED || "vvfast", NONAME_LOG_LEVEL: "info" },
+	env: { ...process.env, PORT: String(PORT), NONAME_GAME_SPEED: process.env.E2E_SPEED || "vvfast", NONAME_LOG_LEVEL: "info", ...(EXTENSIONS ? { NONAME_EXTENSIONS: EXTENSIONS.join(","), NONAME_DATA_DIR: path.resolve(serverDir, "../engine-host/test/fixtures") } : {}) },
 	stdio: ["ignore", "pipe", "pipe"],
 });
 let serverLog = "";
@@ -193,9 +195,30 @@ async function playOneGame(label) {
 	let killed = false;
 	let nextDrop = Date.now() + 8000;
 	let nextReport = Date.now() + 30000;
+	const checkedExtensions = new Set();
 	await waitFor(
 		async () => {
-			for (const p of players) await autoAnswer(p);
+			for (const p of players) {
+				await autoAnswer(p);
+				const state = await clientState(p);
+				if (EXTENSIONS && state?.players && !checkedExtensions.has(p.i)) {
+					for (const frame of p.page.frames().filter(f => f.url().includes("sa-room="))) {
+						const el = await frame.frameElement().catch(() => null);
+						if (!el || !(await el.evaluate(e => !e.classList.contains("pending") && !!e.dataset.game))) continue;
+						const loaded = await frame.evaluate(async () => {
+							const { lib } = await import("/noname.js");
+							return { extensions: lib.config.extensions, character: !!lib.character.e2etest_hero, autoImport: lib.config.extension_auto_import };
+						});
+						try {
+							assert.deepEqual(loaded.extensions, EXTENSIONS);
+							assert.equal(loaded.autoImport, false);
+							if (EXTENSIONS.includes("e2etest")) assert.equal(loaded.character, true);
+						} catch (e) { return fail(`p${p.i} extensions: ${e}`); }
+						checkedExtensions.add(p.i);
+						say(`p${p.i} extensions verified`, JSON.stringify(loaded));
+					}
+				}
+			}
 			if (Date.now() > nextReport) {
 				nextReport = Date.now() + 30000;
 				say("progress", JSON.stringify(await Promise.all(players.map(p => clientState(p)))));
@@ -221,6 +244,7 @@ async function playOneGame(label) {
 			const clientOver = await Promise.all(players.map(p => clientState(p)));
 			const bad = clientOver.filter(s => !s?.over || !s.players);
 			if (bad.length) return fail(`server finished but clients did not: ${JSON.stringify(clientOver)}`);
+			if (EXTENSIONS && checkedExtensions.size !== players.length) return fail("extensions not verified in every client");
 			say(`${label}: clients`, JSON.stringify(clientOver));
 			return true;
 		},

@@ -22,12 +22,44 @@ function tryFile(p) {
 	return null;
 }
 
+// Resolve only inside the supplied root, including symlink targets.
+export function rootedPath(root, name) {
+	const base = path.resolve(root);
+	const target = path.resolve(base, name.replace(/^\/+/, ""));
+	const inside = (r, f) => f === r || f.startsWith(r + path.sep);
+	if (!inside(base, target)) throw new Error(`Path escapes asset root: ${name}`);
+	// Check the closest existing ancestor as well (missing files beneath symlinks).
+	let ancestor = target;
+	while (!fs.existsSync(ancestor) && ancestor !== base) ancestor = path.dirname(ancestor);
+	if (fs.existsSync(base) && !inside(fs.realpathSync(base), fs.realpathSync(ancestor))) throw new Error(`Path escapes asset root: ${name}`);
+	return target;
+}
+
+export function assetPath(coreRoot, name) {
+	const relative = String(name).replace(/^\/+/, "").replace(/^\.\//, "");
+	const core = rootedPath(coreRoot, relative);
+	if (!fs.existsSync(core) && relative.startsWith("extension/") && process.env.NONAME_DATA_DIR) {
+		return rootedPath(process.env.NONAME_DATA_DIR, relative);
+	}
+	return core;
+}
+
 export async function resolve(specifier, context, next) {
 	if (process.env.HOOK_DEBUG) fs.appendFileSync("/tmp/claude-1000/hook.log", specifier + " " + CORE + "\n");
+	const dataRoot = process.env.NONAME_DATA_DIR;
+	if (dataRoot && specifier.startsWith(".") && context.parentURL?.startsWith("file:") && fileURLToPath(context.parentURL).startsWith(path.resolve(dataRoot) + path.sep)) {
+		const target = path.resolve(path.dirname(fileURLToPath(context.parentURL)), specifier);
+		rootedPath(dataRoot, path.relative(path.resolve(dataRoot), target));
+	}
 	let target = null;
 	if (specifier === "noname") target = path.join(CORE, "noname.js");
-	else if (specifier.startsWith("@/")) target = path.join(CORE, "noname", specifier.slice(2));
-	else if (specifier.startsWith("/") && !specifier.startsWith(CORE) && !fs.existsSync(specifier)) target = path.join(CORE, specifier);
+	else if (specifier.startsWith("@/")) target = rootedPath(CORE, "noname/" + specifier.slice(2));
+	else if (specifier.startsWith("/extension/")) {
+		const core = rootedPath(CORE, specifier);
+		const f = tryFile(core);
+		if (f) return { url: pathToFileURL(rootedPath(CORE, path.relative(CORE, f))).href, shortCircuit: true };
+		target = assetPath(CORE, specifier);
+	} else if (specifier.startsWith("/") && !specifier.startsWith(CORE) && !fs.existsSync(specifier)) target = rootedPath(CORE, specifier);
 	else if (specifier === "vue/dist/vue.esm-browser.js") specifier = "vue";
 	else if (specifier.startsWith(".") && specifier.endsWith(".js") && context.parentURL?.startsWith("file:")) {
 		const abs = path.resolve(path.dirname(fileURLToPath(context.parentURL)), specifier);
@@ -35,7 +67,11 @@ export async function resolve(specifier, context, next) {
 	}
 	if (target) {
 		const f = tryFile(target);
-		if (f) return { url: pathToFileURL(f).href, shortCircuit: true };
+		if (f) {
+			const root = process.env.NONAME_DATA_DIR && target.startsWith(path.resolve(process.env.NONAME_DATA_DIR) + path.sep) ? process.env.NONAME_DATA_DIR : CORE;
+			rootedPath(root, path.relative(path.resolve(root), f));
+			return { url: pathToFileURL(f).href, shortCircuit: true };
+		}
 	}
 	if (context.parentURL?.startsWith("file:") && fileURLToPath(context.parentURL).startsWith(CORE) && !specifier.startsWith(".") && !specifier.startsWith("file:") && !specifier.startsWith("node:") && !specifier.startsWith("/")) {
 		// bare imports from core: resolve relative to apps/core

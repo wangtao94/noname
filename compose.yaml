@@ -10,6 +10,7 @@ services:
         #   PORT: "8080"
         #   NONAME_SERVE_WEB: "true"
         #   NONAME_DATA_DIR: /data
+        #   NONAME_EXTENSIONS: "" # 逗号分隔；扩展放在 ./data/extension/<name>/
         #   NONAME_WEB_ROOT: /app/dist
         #   NONAME_ASSET_ROOTS: /app/apps/core
         #   NONAME_RECONNECT_GRACE: 60s

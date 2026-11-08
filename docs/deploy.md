@@ -11,7 +11,7 @@ docker compose logs -f
 
 访问 `http://服务器IP:8080`，健康检查为 `/healthz`。默认镜像 `ghcr.io/wangtao94/noname:latest` 在发布 `vX.Y.Z` 标签时更新；开发版本可将镜像标签改为 `edge`（main）或 `sa-edge`（feat/server-authoritative）。更新使用 `docker compose pull && docker compose up -d`。
 
-数据挂载在当前目录 `./data`，扩展放在 `./data/extensions`。镜像使用非 root 的 node 用户（UID/GID 1000），请先执行 `mkdir -p data && sudo chown -R 1000:1000 data`，确保挂载目录可写。房间与会话保存在内存，重启会结束现有对局。
+数据挂载在当前目录 `./data`，扩展放在 `./data/extension`。镜像使用非 root 的 node 用户（UID/GID 1000），请先执行 `mkdir -p data && sudo chown -R 1000:1000 data`，确保挂载目录可写。房间与会话保存在内存，重启会结束现有对局。
 
 ## 环境变量
 
@@ -21,6 +21,7 @@ docker compose logs -f
 | ---------------------- | -------------- | ------------------------------------------------- |
 | PORT                   | 8080           | HTTP 与 WebSocket 共用端口                        |
 | NONAME_SERVE_WEB       | true           | false 时只提供游戏服务                            |
+| NONAME_EXTENSIONS     | 空             | 服务端启用的扩展名，用逗号分隔                    |
 | NONAME_DATA_DIR        | /data          | 扩展与持久数据目录                                |
 | NONAME_WEB_ROOT        | /app/dist      | 网页构建目录                                      |
 | NONAME_ASSET_ROOTS     | /app/apps/core | 静态资源回退根目录，多个用冒号分隔                |
@@ -30,6 +31,12 @@ docker compose logs -f
 | NONAME_TRUST_PROXY     | false          | 可信反向代理后可设 true；须限制后端端口的直接访问 |
 | NONAME_LOG_LEVEL       | info           | 日志级别                                          |
 | NONAME_GAME_SPEED      | mid            | 默认对局速度                                      |
+
+## 扩展
+
+将管理员安装的扩展放在 `./data/extension/<name>/`，目录中包含 `extension.js`（或 `extension.ts`）、`info.json` 及其资源，再设置 `NONAME_EXTENSIONS: "扩展名1,扩展名2"` 并重启服务。仓库 `apps/core/extension` 中的自带扩展也可以直接按目录名启用（如 `boss`、`cardpile`、`coin`）。扩展需支持联机模式；服务端不会将单机扩展自动改为联机扩展。
+
+服务器启动时会警告并移除找不到入口文件的扩展。所有房间使用同一份管理员名单，Worker 与浏览器游戏页按该名单加载；大厅的房间设置只读展示名单。玩家本地的扩展开关不影响联机游戏页，联机覆盖仅在内存中生效，不保存到玩家设置。默认名单为空。
 
 ## 反向代理
 

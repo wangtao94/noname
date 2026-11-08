@@ -59,12 +59,14 @@ export class RoomManager {
 		this.pool = new WorkerPool({
 			size: 1,
 			capacity: () => this.config.maxRooms - this.liveGames(),
-			preset: { game_speed: config.gameSpeed },
+			preset: { game_speed: config.gameSpeed, extensions: config.extensions, extension_auto_import: false, ...Object.fromEntries(config.extensions.map(n => [`extension_${n}_enable`, true])) },
 			log: msg => this.log.warn({ engine: msg.slice(0, 2000) }, "engine"),
 		});
 		this.#sweepTimer = setInterval(() => this.#sweep(), 5_000);
 		this.#sweepTimer.unref();
 	}
+
+	get extensions() { return this.config.extensions; }
 
 	async init() {
 		this.pool.start();

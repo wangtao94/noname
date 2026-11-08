@@ -50,6 +50,8 @@ export interface ServerConfig {
 	/** extra roots searched for static assets (audio/image/...) when not present in webRoot */
 	assetRoots: string[];
 	dataDir: string;
+	/** Server-admin selected extensions, shared by workers and browser clients. */
+	extensions: string[];
 	reconnectGraceMs: number;
 	roomIdleTtlMs: number;
 	/** 0 = derive from available memory */
@@ -72,6 +74,10 @@ export function loadConfig(): ServerConfig {
 			.filter(Boolean)
 			.map(p => path.resolve(p)),
 		dataDir: path.resolve(str("NONAME_DATA_DIR", path.join(repoRoot, ".data"))),
+		extensions: [...new Set(str("NONAME_EXTENSIONS", "").split(",").map(n => n.trim()).filter(Boolean))].map(n => {
+			if (n === "." || n === ".." || /[\\/\0]/.test(n)) throw new Error(`invalid NONAME_EXTENSIONS name "${n}"`);
+			return n;
+		}),
 		reconnectGraceMs: duration("NONAME_RECONNECT_GRACE", "60s"),
 		roomIdleTtlMs: duration("NONAME_ROOM_IDLE_TTL", "10m"),
 		maxRooms: maxRoomsEnv > 0 ? maxRoomsEnv : autoMaxRooms(),

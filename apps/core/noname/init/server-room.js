@@ -30,6 +30,11 @@ export function getServerRoomParams() {
 export function applyServerRoomConfig(lib, _status) {
 	const params = getServerRoomParams();
 	if (!params) return false;
+	const extensions = [...new Set((new URLSearchParams(location.search).get("sa-ext") || "").split(",").map(n => n.trim()).filter(Boolean))];
+	for (const name of lib.config.extensions || []) lib.config[`extension_${name}_enable`] = false;
+	lib.config.extensions = extensions;
+	for (const name of extensions) lib.config[`extension_${name}_enable`] = true;
+	lib.config.extension_auto_import = false;
 	_status.serverRoom = params;
 	lib.config.mode = "connect";
 	lib.config.show_splash = "off";

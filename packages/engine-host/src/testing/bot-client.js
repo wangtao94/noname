@@ -18,7 +18,7 @@ process.on("uncaughtException", e => log("uncaughtException", e));
 let dropped = false;
 const { lib, game, get, _status, ui } = await bootEngine({
 	log,
-	preset: { new_tutorial: true, mode: "connect", connect_nickname: name, ...preset },
+	preset: { new_tutorial: true, mode: "connect", read_clipboard_mode_config_connect: false, connect_nickname: name, ...preset },
 	beforeBoot: ({ lib, game, ui }) => {
 		ui.create.menu = () => {};
 		game.reload = () => log("client reload requested");

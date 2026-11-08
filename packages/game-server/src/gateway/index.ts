@@ -88,7 +88,7 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 					let set = controlSockets.get(uid);
 					if (!set) controlSockets.set(uid, (set = new Set()));
 					set.add(ws);
-					send(ws, { t: "welcome", uid, nickname: user.nickname, avatar: user.avatar, version: PROTOCOL_VERSION, serverVersion: opts.serverVersion, modes: rooms.modes });
+					send(ws, { t: "welcome", uid, nickname: user.nickname, avatar: user.avatar, version: PROTOCOL_VERSION, serverVersion: opts.serverVersion, extensions: rooms.extensions, modes: rooms.modes });
 					presence(uid);
 					rooms.updateProfile(user);
 					const room = rooms.roomOf(uid);

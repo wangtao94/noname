@@ -28,6 +28,7 @@ const state = {
 	connected: false,
 	me: null,
 	modes: [],
+	extensions: [],
 	room: null,
 	retry: 0,
 	/** gameId -> iframe */
@@ -83,6 +84,7 @@ function onMessage(msg) {
 		case "welcome":
 			state.me = { uid: msg.uid, nickname: msg.nickname, avatar: msg.avatar };
 			state.modes = msg.modes ?? [];
+			state.extensions = msg.extensions ?? [];
 			$("nickname").value = msg.nickname;
 			fillModeSelect($("createMode"), "identity");
 			// deep link /room/<code>
@@ -132,6 +134,7 @@ function escapeHtml(s) {
 
 function gameUrl(gameId, defer = false) {
 	const p = new URLSearchParams({ "sa-room": state.room.code, "sa-uid": state.me.uid, "sa-token": token });
+	p.set("sa-ext", state.extensions.join(","));
 	if (gameId) p.set("sa-game", gameId);
 	if (defer) p.set("sa-defer", "1");
 	return `/index.html?${p}`;
@@ -269,6 +272,7 @@ function renderRoom(room) {
 	const playing = room.status === "playing";
 	$("startBtn").hidden = !isOwner || room.status !== "lobby";
 	$("roomHint").textContent = playing ? "对局进行中" : isOwner ? `${room.members.length}/${room.maxPlayers} 人，空位由 AI 补上` : "等待房主开始游戏";
+	$("serverExtensions").textContent = `服务器扩展：${state.extensions.join("、") || "无"}`;
 	$("settingsNote").textContent = isOwner ? "" : "（仅房主可修改）";
 	fillModeSelect($("roomMode"), room.mode);
 	$("roomMode").disabled = !isOwner || playing;

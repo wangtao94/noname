@@ -134,6 +134,10 @@ function modeCatalog(lib) {
 const readyTimer = setInterval(() => {
 	if (_status.waitingForPlayer && game.connectPlayers) {
 		clearInterval(readyTimer);
+		if (process.env.NONAME_EXTENSION_SELFTEST === "1") {
+			if (!lib.character.e2etest_hero || !lib.skill.e2etest_vigor) throw new Error("fixture extension character/skill missing");
+			log("extension-selftest", { character: "e2etest_hero", extensions: lib.config.extensions });
+		}
 		post({ t: "ready" });
 		for (const m of pending.splice(0)) handle(m);
 	}

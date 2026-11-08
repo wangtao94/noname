@@ -54,7 +54,7 @@ export type ClientMsg =
 	| { t: "ping" };
 
 export type ServerMsg =
-	| { t: "welcome"; uid: string; nickname: string; avatar: string; version: number; serverVersion: string; modes: ModeInfo[] }
+	| { t: "welcome"; uid: string; nickname: string; avatar: string; version: number; serverVersion: string; extensions: string[]; modes: ModeInfo[] }
 	| { t: "room"; room: RoomView | null }
 	| { t: "error"; code: string; message: string }
 	| { t: "pong" };

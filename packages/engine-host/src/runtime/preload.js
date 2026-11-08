@@ -3,10 +3,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { assetPath, rootedPath } from "./hooks.js";
+import { fileURLToPath } from "node:url";
 
 export async function serverPreload({ lib, game, coreRoot, log }) {
 	const { FileSystem, installLegacyFileSystemAPI } = await import("@/library/fs/index.js");
-	const abs = p => path.join(coreRoot, String(p).replace(/^\/+/, "").replace(/^\.\//, ""));
+	const abs = p => assetPath(coreRoot, p);
 	const overlay = new Map();
 	const adapter = {
 		async open() {
@@ -70,7 +72,12 @@ export async function serverPreload({ lib, game, coreRoot, log }) {
 
 	const toFile = url => {
 		let s = String(url);
-		if (s.startsWith("file://")) return new URL(s).pathname;
+		if (s.startsWith("file://")) {
+			const file = fileURLToPath(s);
+			const dataRoot = process.env.NONAME_DATA_DIR;
+			if (dataRoot && file.startsWith(path.resolve(dataRoot) + path.sep)) return rootedPath(dataRoot, path.relative(path.resolve(dataRoot), file));
+			return abs(path.relative(coreRoot, file));
+		}
 		if (s.startsWith("http://localhost/")) s = s.slice("http://localhost/".length);
 		s = s.split("?")[0];
 		return abs(s);

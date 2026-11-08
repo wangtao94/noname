@@ -1,0 +1,6 @@
+{
+	"name": "e2etest",
+	"intro": "Server extension integration fixture",
+	"author": "noname tests",
+	"version": "1.0.0"
+}
