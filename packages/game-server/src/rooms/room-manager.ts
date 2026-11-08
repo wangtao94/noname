@@ -98,17 +98,20 @@ export class RoomManager {
 	}
 
 	summaries(): RoomSummary[] {
-		return [...this.rooms.values()]
-			.filter(r => r.config.public === true)
-			.map(r => ({
-				code: r.code,
-				mode: r.mode,
-				modeName: this.modes.find(m => m.id === r.mode)?.name ?? r.mode,
-				ownerName: r.members.find(m => m.uid === r.ownerId)?.nickname ?? "无名玩家",
-				players: r.members.length,
-				maxPlayers: this.#maxPlayers(r),
-				status: r.status,
-			}));
+		return (
+			[...this.rooms.values()]
+				// rooms whose members all closed the page wait for the idle sweep; do not advertise them
+				.filter(r => r.config.public === true && r.members.some(m => m.connections > 0))
+				.map(r => ({
+					code: r.code,
+					mode: r.mode,
+					modeName: this.modes.find(m => m.id === r.mode)?.name ?? r.mode,
+					ownerName: r.members.find(m => m.uid === r.ownerId)?.nickname ?? "无名玩家",
+					players: r.members.length,
+					maxPlayers: this.#maxPlayers(r),
+					status: r.status,
+				}))
+		);
 	}
 
 	liveGames() {
@@ -226,8 +229,8 @@ export class RoomManager {
 		if (!room) return;
 		this.#userRoom.delete(uid);
 		room.members = room.members.filter(m => m.uid !== uid);
+		if (!room.members.length) return this.#remove(room, "empty");
 		if (room.ownerId === uid) this.#handOver(room);
-		if (!room.members.length) room.emptySince = Date.now();
 		this.#emit(room);
 	}
 
@@ -280,6 +283,25 @@ export class RoomManager {
 		room.mode = nextMode;
 		room.config = nextConfig;
 		this.#emit(room);
+	}
+
+	/** Owner closes the room for everyone (not during a game). Returns the uids that were in it. */
+	dissolve(uid: string): string[] {
+		const room = this.#requireOwner(uid);
+		if (room.status === "playing") throw new RoomError("playing", "对局进行中，结束后才能解散房间");
+		const members = room.members.map(m => m.uid);
+		this.#remove(room, "dissolved");
+		return members;
+	}
+
+	#remove(room: Room, reason: string) {
+		this.log.info({ room: room.code, reason }, "room closed");
+		this.rooms.delete(room.code);
+		for (const m of room.members) this.#userRoom.delete(m.uid);
+		room.members = [];
+		this.#emit(room);
+		void room.game?.close();
+		for (const g of room.retiring) void g.close();
 	}
 
 	kick(uid: string, target: string) {
@@ -383,8 +405,8 @@ export class RoomManager {
 					this.#emit(room);
 				}
 			}
-			// members who closed the lobby and never came back (lobby only; in-game seats stay)
-			if (room.status === "lobby") {
+			// members who closed the page and never came back (not during a game: in-game seats stay)
+			if (room.status !== "playing") {
 				for (const m of [...room.members]) {
 					if (m.connections === 0 && m.offlineSince && now - m.offlineSince > this.config.reconnectGraceMs) this.leave(m.uid);
 				}
@@ -392,14 +414,7 @@ export class RoomManager {
 			const nobodyOnline = room.members.every(m => m.connections === 0);
 			if (nobodyOnline && !room.emptySince) room.emptySince = now;
 			if (!nobodyOnline) delete room.emptySince;
-			if (room.emptySince && now - room.emptySince > this.config.roomIdleTtlMs) {
-				this.log.info({ room: room.code }, "room closed (idle)");
-				this.rooms.delete(room.code);
-				this.#emit(room);
-				for (const m of room.members) this.#userRoom.delete(m.uid);
-				void room.game?.close();
-				for (const g of room.retiring) void g.close();
-			}
+			if (room.emptySince && now - room.emptySince > this.config.roomIdleTtlMs) this.#remove(room, "idle");
 		}
 	}
 

@@ -148,6 +148,14 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 						rooms.leave(u.uid);
 						send(ws, { t: "room", room: null });
 						break;
+					case "room.dissolve":
+						for (const member of rooms.dissolve(u.uid)) {
+							for (const s of controlSockets.get(member) ?? []) {
+								send(s, { t: "room", room: null });
+								if (member !== u.uid) send(s, { t: "error", code: "dissolved", message: "房主已解散房间" });
+							}
+						}
+						break;
 					case "room.config":
 						rooms.configure(u.uid, msg.mode, msg.config);
 						break;

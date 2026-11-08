@@ -21,7 +21,10 @@ export function installHostOverrides({ lib, game, get, _status, ui, profiles = n
 		this.onlineKey = config?.onlineKey;
 		this.avatar = config?.avatar;
 		this.nickname = config?.nickname || "无名玩家";
-		const slot = game.connectPlayers.find(p => !p.classList.contains("unselectable2") && (!p.playerid || p === game.me) && !p.ws);
+		// waitForPlayer reserves connectPlayers[0] for the legacy host's own browser (playerid "1", no ws).
+		// The server has no such browser, so that seat is free for a client too; otherwise a full room
+		// denies the last player and the game only starts after the join timeout, with AI in their seat.
+		const slot = game.connectPlayers.find(p => !p.classList.contains("unselectable2") && (!p.playerid || p.playerid === "1" || p === game.me) && !p.ws);
 		if (!slot) {
 			this.send("denied", "number");
 			lib.node.clients.remove(this);

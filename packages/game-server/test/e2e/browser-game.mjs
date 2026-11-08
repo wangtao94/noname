@@ -18,6 +18,8 @@ const PORT = Number(process.env.E2E_PORT || 18090);
 const PLAYERS = Number(process.env.E2E_PLAYERS || 3);
 const SEATS = String(process.env.E2E_SEATS || 4);
 const RESTART = process.env.E2E_RESTART === "1";
+// owner reloads the lobby after the first game, then starts the next one from the room page
+const RELOAD_RESTART = process.env.E2E_RELOAD_RESTART === "1";
 const KILL_OWNER = process.env.E2E_KILL_OWNER === "1";
 const DROP = process.env.E2E_DROP === "1";
 const DUP_TAB = process.env.E2E_DUP_TAB === "1";
@@ -194,8 +196,15 @@ async function playOneGame(label) {
 	const before = Date.now();
 	const marks = await Promise.all(players.map(markShell));
 	const prevGame = await visibleGame(players[1]);
-	await waitFor(() => owner.page.isVisible(label === "first" ? "#startBtn" : "#againBtn"), 30000, "start button");
-	await owner.page.click(label === "first" ? "#startBtn" : "#againBtn");
+	let startSel = label === "first" ? "#startBtn" : "#againBtn";
+	if (label === "reload") {
+		await owner.page.reload();
+		await waitFor(async () => (await owner.page.isVisible("#startBtn")) || (await owner.page.isVisible("#againBtn")), 30000, "start button after reload");
+		startSel = (await owner.page.isVisible("#startBtn")) ? "#startBtn" : "#againBtn";
+		say(`reload: owner sees ${startSel} (${await owner.page.textContent(startSel)})`);
+	}
+	await waitFor(() => owner.page.isVisible(startSel), 30000, "start button");
+	await owner.page.click(startSel);
 	say(`${label}: start clicked`);
 	if (label !== "first") {
 		// P3: the new game must become visible without reloading the lobby page
@@ -298,6 +307,7 @@ async function playOneGame(label) {
 
 await playOneGame("first");
 if (RESTART) await playOneGame("second");
+if (RELOAD_RESTART) await playOneGame("reload");
 
 const health = await (await fetch(`${base}/healthz`)).json();
 say("health", JSON.stringify(health), "drops", drops);

@@ -41,6 +41,7 @@ node --import ./src/runtime/register.js ./src/testing/extension-game.js
 
 cd packages/game-server                                               # 先在根目录 pnpm build
 E2E_DROP=1 E2E_KILL_OWNER=1 E2E_RESTART=1 E2E_SPEED=vvfast node test/e2e/browser-game.mjs
+E2E_PLAYERS=4 E2E_SEATS=4 E2E_SPEED=vvfast node test/e2e/browser-game.mjs   # 满员（无 AI 空位）
 ```
 
 浏览器测试用 `playwright-core`，需要先安装 Chromium：`npx playwright-core install chromium-headless-shell`。一局真实对局要 1–3 分钟；判定通过的标准是**每个浏览器客户端自己的引擎**都进入结束状态，不只是服务端结束。

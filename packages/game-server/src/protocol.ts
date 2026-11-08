@@ -67,7 +67,7 @@ export interface RoomSummary {
 	status: RoomView["status"];
 }
 
-export type ClientMsg = { t: "rooms.watch"; on: boolean } | { t: "hello"; token: string; nickname?: string; avatar?: string } | { t: "profile"; nickname?: string; avatar?: string } | { t: "room.create"; mode?: string; config?: Record<string, unknown> } | { t: "room.join"; code: string } | { t: "room.leave" } | { t: "room.config"; mode?: string; config?: Record<string, unknown> } | { t: "room.kick"; uid: string } | { t: "room.transfer"; uid: string } | { t: "room.start" } | { t: "room.restart" } | { t: "room.back" } | { t: "ping" };
+export type ClientMsg = { t: "rooms.watch"; on: boolean } | { t: "hello"; token: string; nickname?: string; avatar?: string } | { t: "profile"; nickname?: string; avatar?: string } | { t: "room.create"; mode?: string; config?: Record<string, unknown> } | { t: "room.join"; code: string } | { t: "room.leave" } | { t: "room.dissolve" } | { t: "room.config"; mode?: string; config?: Record<string, unknown> } | { t: "room.kick"; uid: string } | { t: "room.transfer"; uid: string } | { t: "room.start" } | { t: "room.restart" } | { t: "room.back" } | { t: "ping" };
 
 export type ServerMsg = { t: "welcome"; uid: string; nickname: string; avatar: string; version: number; serverVersion: string; extensions: string[]; modes: ModeInfo[]; packs: PackCatalog } | { t: "rooms"; rooms: RoomSummary[] } | { t: "room"; room: RoomView | null } | { t: "error"; code: string; message: string } | { t: "pong" };
 

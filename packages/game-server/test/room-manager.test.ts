@@ -49,7 +49,9 @@ test("public room summaries reflect owner, seats, status and visibility", async 
 	const rooms = fixture();
 	try {
 		const publicRoom = rooms.create(user("owner"));
+		rooms.setPresence("owner", 1);
 		rooms.create(user("private"), "identity", { public: false });
+		rooms.setPresence("private", 1);
 		assert.deepEqual(rooms.summaries(), [{ code: publicRoom.code, mode: "identity", modeName: "身份", ownerName: "owner", players: 1, maxPlayers: 4, status: "lobby" }]);
 		rooms.join(user("guest"), publicRoom.code);
 		rooms.transfer("owner", "guest");
@@ -111,6 +113,7 @@ test("rooms.watch pushes immediately, coalesces changes to one per second, and s
 		ws.send(JSON.stringify({ t: "rooms.watch", on: true }));
 		await wait(() => lists().length === 1);
 		const room = rooms.create(user("owner"));
+		rooms.setPresence("owner", 1);
 		for (let i = 0; i < 10; i++) rooms.updateProfile({ ...user("owner"), nickname: `房主${i}` });
 		await new Promise(resolve => setTimeout(resolve, 150));
 		assert.equal(lists().length, 1);
@@ -207,6 +210,39 @@ test("pack details are fetched separately with 200/404 and ETag", async () => {
 		}
 	} finally {
 		await app.close();
+		await rooms.close();
+	}
+});
+
+test("owner can dissolve a room outside a game; empty and abandoned rooms disappear", async () => {
+	const rooms = fixture();
+	try {
+		const room = rooms.create(user("owner"));
+		rooms.join(user("guest"), room.code);
+		rooms.setPresence("owner", 1);
+		rooms.setPresence("guest", 1);
+		assert.throws(() => rooms.dissolve("guest"), /只有房主/);
+		room.status = "playing";
+		assert.throws(() => rooms.dissolve("owner"), /对局进行中/);
+		room.status = "ended";
+		assert.deepEqual(rooms.dissolve("owner").sort(), ["guest", "owner"]);
+		assert.equal(rooms.rooms.has(room.code), false);
+		assert.equal(rooms.roomOf("guest"), undefined);
+		assert.deepEqual(rooms.summaries(), []);
+
+		// last member leaving removes the room at once
+		const solo = rooms.create(user("solo"));
+		rooms.leave("solo");
+		assert.equal(rooms.rooms.has(solo.code), false);
+
+		// a room whose members all closed the page is hidden from the list
+		const stale = rooms.create(user("afk"));
+		rooms.setPresence("afk", 1);
+		assert.equal(rooms.summaries().length, 1);
+		rooms.setPresence("afk", 0);
+		assert.deepEqual(rooms.summaries(), []);
+		assert.equal(rooms.rooms.has(stale.code), true);
+	} finally {
 		await rooms.close();
 	}
 });
