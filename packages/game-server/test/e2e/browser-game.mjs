@@ -99,8 +99,14 @@ async function dropSocket(p) {
 
 /** the newest game iframe's engine state */
 async function clientState(p) {
-	const frames = p.page.frames().filter(f => f.url().includes("sa-room="));
-	const frame = frames[frames.length - 1];
+	// the visible game iframe (the lobby may also hold a hidden, preloaded page for the next game)
+	let frame = null;
+	for (const f of p.page.frames()) {
+		if (!f.url().includes("sa-room=")) continue;
+		const el = await f.frameElement().catch(() => null);
+		const visible = el && (await el.evaluate(e => !e.classList.contains("pending") && !!e.dataset.game).catch(() => false));
+		if (visible) frame = f;
+	}
 	if (!frame) return null;
 	return frame
 		.evaluate(async () => {
