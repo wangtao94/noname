@@ -42,7 +42,7 @@ docker compose up -d
 
 打开 `http://服务器IP:8080`，创建房间，把邀请链接发给朋友即可。
 
-- 镜像：`ghcr.io/wangtao94/noname`，支持 amd64 / arm64，基于 Debian 12 + Node 24
+- 镜像：`ghcr.io/wangtao94/noname`，x86_64（amd64），基于 Debian 12 + Node 24
 - 所有配置都有默认值，按需在 `compose.yaml` 中取消注释即可修改，完整列表见 [部署文档](./docs/deploy.md)
 - 公网部署建议放在 HTTPS 反向代理后面（文档里有 nginx 示例），浏览器才能启用离线资源缓存
 

@@ -16,7 +16,6 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v6
-            - uses: docker/setup-qemu-action@v3
             - uses: docker/setup-buildx-action@v3
             - name: Image tags
               id: meta
@@ -39,7 +38,7 @@ jobs:
             - uses: docker/build-push-action@v6
               with:
                   context: .
-                  platforms: linux/amd64,linux/arm64
+                  platforms: linux/amd64
                   push: ${{ github.event_name != 'pull_request' }}
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
@@ -91,7 +90,7 @@ jobs:
 
                   ## 部署
 
-                  镜像：\`${IMAGE}:${VERSION}\`（amd64 / arm64）
+                  镜像：\`${IMAGE}:${VERSION}\`（amd64）
 
                   \`\`\`sh
                   mkdir noname && cd noname
