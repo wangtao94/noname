@@ -39,6 +39,8 @@ process.on("uncaughtException", e => log("uncaughtException", e));
 
 let engine;
 const pending = [];
+/** uid -> lobby profile ({ nickname, avatar }); overrides what the client reports */
+const profiles = new Map();
 
 engine = await bootEngine({
 	log,
@@ -75,7 +77,7 @@ engine = await bootEngine({
 				return switchMode.call(this, mode, configx ?? { ...defaultConfigOL(lib, mode), ...configPatch, mode });
 			});
 		};
-		installHostOverrides({ lib, game, get, _status, ui });
+		installHostOverrides({ lib, game, get, _status, ui, profiles });
 		ensureCommonConnectOptions(lib);
 		// Server plugins: expose options through the existing connect catalog.
 		injectPluginOptions(lib);
@@ -141,6 +143,7 @@ function handle(m) {
 	const c = lib.message.client;
 	switch (m.t) {
 		case "open":
+			if (m.profile) profiles.set(m.id, m.profile);
 			c.onconnection(m.id);
 			break;
 		case "msg":

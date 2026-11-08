@@ -176,7 +176,7 @@ export function attachGateway(opts: { server: Server; rooms: RoomManager; users:
 		const sock = { send: (d: string) => ws.readyState === ws.OPEN && ws.send(d), close: (c?: number, r?: string) => ws.close(c, r) };
 		const resumeSeq = url.searchParams.get("resume");
 		const resume = resumeSeq !== null ? { serverSeq: Number(resumeSeq) || 0, clientSeq: Number(url.searchParams.get("cseq")) || 0 } : undefined;
-		session.attach(user.uid, sock, resume);
+		session.attach(user.uid, sock, resume, { nickname: user.nickname, avatar: user.avatar });
 		ws.on("message", raw => session.message(user.uid, sock, String(raw)));
 		ws.on("close", () => session.detach(user.uid, sock));
 	});

@@ -92,6 +92,8 @@ export class GameSession extends EventEmitter {
 	/** uid -> resumable stream; present while the engine considers the user connected */
 	readonly #links = new Map<string, Link>();
 	readonly #joined = new Set<string>();
+	/** lobby profile per uid, handed to the engine so in-game names match the lobby */
+	readonly #profiles = new Map<string, { nickname: string; avatar: string }>();
 	#beginTimer?: NodeJS.Timeout;
 
 	constructor(
@@ -119,7 +121,7 @@ export class GameSession extends EventEmitter {
 		switch (m.t) {
 			case "ready":
 				this.#setStatus("waiting");
-				for (const uid of this.#links.keys()) this.engine.post({ t: "open", id: uid });
+				for (const uid of this.#links.keys()) this.#open(uid);
 				this.#beginTimer = setTimeout(() => this.#begin(), this.opts.joinTimeoutMs);
 				break;
 			case "joined":
@@ -161,7 +163,12 @@ export class GameSession extends EventEmitter {
 	 * seamlessly if possible; otherwise the client is told to reload ("fresh") and reconnect from scratch,
 	 * which the engine answers with a full snapshot (reinit).
 	 */
-	attach(uid: string, socket: GameSocket, resume?: ResumeRequest) {
+	#open(uid: string) {
+		this.engine.post({ t: "open", id: uid, profile: this.#profiles.get(uid) });
+	}
+
+	attach(uid: string, socket: GameSocket, resume?: ResumeRequest, profile?: { nickname: string; avatar: string }) {
+		if (profile) this.#profiles.set(uid, profile);
 		const link = this.#links.get(uid);
 		if (resume) {
 			if (link?.canResume(resume.serverSeq)) {
@@ -185,7 +192,7 @@ export class GameSession extends EventEmitter {
 		});
 		fresh.attach(socket);
 		this.#links.set(uid, fresh);
-		if (this.status !== "starting") this.engine.post({ t: "open", id: uid });
+		if (this.status !== "starting") this.#open(uid);
 	}
 
 	message(uid: string, socket: GameSocket, frame: string) {

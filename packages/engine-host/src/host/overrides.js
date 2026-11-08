@@ -5,9 +5,15 @@
 // `game.notMe = true` + `_status.auto = true` make `isMine()` false everywhere, so the engine takes the
 // `isOnline()` (remote) or AI branch for every seat.
 
-export function installHostOverrides({ lib, game, get, _status, ui }) {
+export function installHostOverrides({ lib, game, get, _status, ui, profiles = new Map() }) {
 	const serverInit = lib.message.server.init;
 	lib.message.server.init = function (version, config, bannedInfo) {
+		// names shown in game come from the lobby profile, not from the client's local settings
+		const profile = profiles.get(this.id);
+		if (profile && config && typeof config === "object") {
+			config.nickname = profile.nickname || config.nickname;
+			if (profile.avatar) config.avatar = profile.avatar;
+		}
 		// reconnect (known player id) and in-game joins keep the legacy behaviour
 		if (!_status.waitingForPlayer || (config?.id && lib.playerOL?.[config.id])) {
 			return serverInit.call(this, version, config, bannedInfo);
