@@ -47,7 +47,13 @@ const fail = async msg => {
 		fs.mkdirSync(shotDir, { recursive: true });
 		for (const p of players) {
 			await p.page.screenshot({ path: `${shotDir}/p${p.i}.png` }).catch(() => {});
-			say(`p${p.i} frames:`, p.page.frames().map(f => f.url().slice(0, 120)).join(" | "));
+			say(
+				`p${p.i} frames:`,
+				p.page
+					.frames()
+					.map(f => f.url().slice(0, 120))
+					.join(" | ")
+			);
 		}
 		fs.writeFileSync(`${shotDir}/server.log`, serverLog);
 	} catch {}
@@ -150,16 +156,8 @@ await waitFor(() => owner.page.isEnabled("#createBtn"), 30000, "lobby");
 await owner.page.click("#createBtn");
 const code = await waitFor(() => roomState(owner), 30000, "room created");
 say("room", code);
-// 4 seats
-await owner.page.selectOption("#options select >> nth=0", { index: 0 }).catch(() => {});
-await owner.page.evaluate(seats => {
-	const ws = [...document.querySelectorAll("#options label")].find(l => l.textContent.includes("游戏人数") || l.textContent.includes("人数"));
-	const sel = ws?.querySelector("select");
-	if (sel) {
-		sel.value = seats;
-		sel.dispatchEvent(new Event("change"));
-	}
-}, SEATS);
+// Select seats by the catalog key, independent of section order.
+await owner.page.selectOption('#options select[data-key="player_number"]', SEATS);
 
 for (const p of players.slice(1)) {
 	await p.page.goto(`${base}/room/${code}`);
@@ -190,8 +188,7 @@ async function duplicateTab(p) {
 }
 
 const markShell = p => p.page.evaluate(() => (window.__e2eShellMark ??= Math.random())).catch(() => null);
-const visibleGame = p =>
-	p.page.evaluate(() => [...document.querySelectorAll("#frames iframe:not(.pending)")].map(f => f.dataset.game).pop() ?? null).catch(() => null);
+const visibleGame = p => p.page.evaluate(() => [...document.querySelectorAll("#frames iframe:not(.pending)")].map(f => f.dataset.game).pop() ?? null).catch(() => null);
 
 async function playOneGame(label) {
 	const before = Date.now();
@@ -203,10 +200,14 @@ async function playOneGame(label) {
 	if (label !== "first") {
 		// P3: the new game must become visible without reloading the lobby page
 		const t = Date.now();
-		await waitFor(async () => {
-			const g = await visibleGame(players[1]);
-			return g && g !== prevGame;
-		}, 60000, "new game visible");
+		await waitFor(
+			async () => {
+				const g = await visibleGame(players[1]);
+				return g && g !== prevGame;
+			},
+			60000,
+			"new game visible"
+		);
 		say(`${label}: new game visible after ${((Date.now() - t) / 1000).toFixed(1)}s`);
 		const after = await Promise.all(players.map(markShell));
 		for (let i = 1; i < players.length; i++) if (after[i] !== marks[i]) return fail(`p${i} lobby page reloaded during restart`);
@@ -236,7 +237,9 @@ async function playOneGame(label) {
 							assert.deepEqual(loaded.extensions, EXTENSIONS);
 							assert.equal(loaded.autoImport, false);
 							if (EXTENSIONS.includes("e2etest")) assert.equal(loaded.character, true);
-						} catch (e) { return fail(`p${p.i} extensions: ${e}`); }
+						} catch (e) {
+							return fail(`p${p.i} extensions: ${e}`);
+						}
 						checkedExtensions.add(p.i);
 						say(`p${p.i} extensions verified`, JSON.stringify(loaded));
 					}

@@ -1,4 +1,5 @@
 // noname game server entry.
+import { registerCatalogApi } from "./catalog-api.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +30,9 @@ for (const name of config.extensions) {
 				const base = await fs.realpath(root);
 				const file = await fs.realpath(path.join(base, "extension", name, `extension.${suffix}`));
 				if (file.startsWith(base + path.sep) && (await fs.stat(file)).isFile()) found = true;
-			} catch { /* absent extension */ }
+			} catch {
+				/* absent extension */
+			}
 		}
 	}
 	if (found) installed.push(name);
@@ -68,6 +71,8 @@ if (config.serveWeb) {
 	registerFsApi(app, [config.webRoot, config.dataDir, ...config.assetRoots]);
 	await registerStatic(app, { webRoot: config.webRoot, assetRoots: [config.dataDir, ...config.assetRoots] });
 }
+
+registerCatalogApi(app, rooms);
 
 const gateway = attachGateway({ server: app.server, rooms, users, log: app.log, serverVersion });
 

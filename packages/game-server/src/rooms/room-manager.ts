@@ -1,7 +1,7 @@
 // Rooms live on the server; the owner only holds management permissions.
 import { randomInt } from "node:crypto";
 import type { ServerConfig } from "../config.ts";
-import type { MemberView, ModeInfo, RoomView } from "../protocol.ts";
+import type { BanCandidate, PackCatalog, MemberView, ModeInfo, RoomView, RoomSummary } from "../protocol.ts";
 import type { RecordSink, UserRecord } from "../store.ts";
 import { GameSession } from "./game-session.ts";
 import { WorkerPool } from "./worker-pool.ts";
@@ -49,6 +49,9 @@ export class RoomManager {
 	readonly #listeners = new Set<RoomListener>();
 	readonly pool: WorkerPool;
 	modes: ModeInfo[] = [];
+	packs: PackCatalog = { characterPacks: [], cardPacks: [], defaultCharacterPacks: [], defaultCardPacks: [] };
+	characters: BanCandidate[] = [];
+	cards: BanCandidate[] = [];
 	#sweepTimer: NodeJS.Timeout;
 
 	constructor(
@@ -66,13 +69,19 @@ export class RoomManager {
 		this.#sweepTimer.unref();
 	}
 
-	get extensions() { return this.config.extensions; }
+	get extensions() {
+		return this.config.extensions;
+	}
 
 	async init() {
 		this.pool.start();
 		// learn the mode catalog from a booted engine
 		const w = await this.pool.take();
 		this.modes = (w.catalog as ModeInfo[]).filter(m => m.options.length);
+		const { characters = [], cards = [], ...packs } = this.pool.assets!;
+		this.packs = packs;
+		this.characters = characters;
+		this.cards = cards;
 		await w.terminate();
 	}
 
@@ -83,6 +92,20 @@ export class RoomManager {
 
 	#emit(room: Room) {
 		for (const fn of this.#listeners) fn(room);
+	}
+
+	summaries(): RoomSummary[] {
+		return [...this.rooms.values()]
+			.filter(r => r.config.public === true)
+			.map(r => ({
+				code: r.code,
+				mode: r.mode,
+				modeName: this.modes.find(m => m.id === r.mode)?.name ?? r.mode,
+				ownerName: r.members.find(m => m.uid === r.ownerId)?.nickname ?? "无名玩家",
+				players: r.members.length,
+				maxPlayers: this.#maxPlayers(r),
+				status: r.status,
+			}));
 	}
 
 	liveGames() {
@@ -126,13 +149,26 @@ export class RoomManager {
 	#defaultConfig(mode: string) {
 		const info = this.modes.find(m => m.id === mode);
 		if (!info) throw new RoomError("bad_mode", `不支持的模式：${mode}`);
-		return Object.fromEntries(info.options.map(o => [o.key, o.init]));
+		return { ...Object.fromEntries(info.options.map(o => [o.key, o.init])), public: true, characterPack: [...this.packs.defaultCharacterPacks], cardPack: [...this.packs.defaultCardPacks], banned: [], bannedcards: [] };
 	}
 
 	#sanitizeConfig(mode: string, patch: Record<string, unknown> = {}) {
 		const info = this.modes.find(m => m.id === mode);
 		if (!info) throw new RoomError("bad_mode", `不支持的模式：${mode}`);
 		const out: Record<string, unknown> = {};
+		if (!patch || typeof patch !== "object" || Array.isArray(patch)) return out;
+		if (typeof patch.public === "boolean") out.public = patch.public;
+		for (const [key, entries, cap] of [
+			["characterPack", this.packs.characterPacks, 256],
+			["cardPack", this.packs.cardPacks, 256],
+			["banned", this.characters, 10000],
+			["bannedcards", this.cards, 2000],
+		] as const) {
+			const value = patch[key];
+			if (!Array.isArray(value)) continue;
+			const valid = new Set(entries.map(e => e.id));
+			out[key] = [...new Set(value.filter(id => typeof id === "string" && valid.has(id)))].slice(0, cap);
+		}
 		for (const opt of info.options) {
 			if (!(opt.key in patch)) continue;
 			const v = patch[opt.key];
@@ -230,14 +266,13 @@ export class RoomManager {
 	configure(uid: string, mode: string | undefined, patch: Record<string, unknown> | undefined) {
 		const room = this.#requireOwner(uid);
 		if (room.status === "playing") throw new RoomError("playing", "对局进行中不能修改设置");
-		if (mode && mode !== room.mode) {
-			room.mode = mode;
-			room.config = this.#defaultConfig(mode);
-		}
-		Object.assign(room.config, this.#sanitizeConfig(room.mode, patch));
-		if (room.members.length > this.#maxPlayers(room)) {
+		const nextMode = mode || room.mode;
+		const nextConfig = { ...(nextMode === room.mode ? room.config : { ...this.#defaultConfig(nextMode), public: room.config.public }), ...this.#sanitizeConfig(nextMode, patch) };
+		if (room.members.length > this.#maxPlayers({ ...room, mode: nextMode, config: nextConfig })) {
 			throw new RoomError("too_many", `当前房间有 ${room.members.length} 人，超过所选人数`);
 		}
+		room.mode = nextMode;
+		room.config = nextConfig;
 		this.#emit(room);
 	}
 
@@ -270,11 +305,18 @@ export class RoomManager {
 			this.#emit(room);
 			throw new RoomError("engine", `引擎启动失败：${(e as Error).message}`);
 		}
-		const game = new GameSession(engine, room.mode, { ...room.config }, room.members.map(m => m.uid), {
-			joinTimeoutMs: 60_000,
-			graceMs: this.config.reconnectGraceMs,
-			log: msg => this.log.info({ room: room.code, game: game.gameId.slice(0, 8), msg }, "game"),
-		});
+		const { public: _public, ...engineConfig } = room.config;
+		const game = new GameSession(
+			engine,
+			room.mode,
+			engineConfig,
+			room.members.map(m => m.uid),
+			{
+				joinTimeoutMs: 60_000,
+				graceMs: this.config.reconnectGraceMs,
+				log: msg => this.log.info({ room: room.code, game: game.gameId.slice(0, 8), msg }, "game"),
+			}
+		);
 		game.on("status", s => {
 			if (room.game !== game) return;
 			if (s === "over" || s === "closed") {
@@ -347,6 +389,7 @@ export class RoomManager {
 			if (room.emptySince && now - room.emptySince > this.config.roomIdleTtlMs) {
 				this.log.info({ room: room.code }, "room closed (idle)");
 				this.rooms.delete(room.code);
+				this.#emit(room);
 				for (const m of room.members) this.#userRoom.delete(m.uid);
 				void room.game?.close();
 				for (const g of room.retiring) void g.close();

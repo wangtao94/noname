@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { applyServerRoomConfig } from "../../../apps/core/noname/init/server-room.js";
 
 test("server-room extensions override local settings in memory, including empty lists", () => {
+	const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+	Object.defineProperty(globalThis, "window", { configurable: true, value: {} });
 	const previous = Object.getOwnPropertyDescriptor(globalThis, "location");
 	try {
 		for (const value of ["e2etest", ""]) {
@@ -19,6 +21,8 @@ test("server-room extensions override local settings in memory, including empty 
 			assert.deepEqual(saved, ["local-only", "e2etest"]);
 		}
 	} finally {
+		if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+		else Reflect.deleteProperty(globalThis, "window");
 		if (previous) Object.defineProperty(globalThis, "location", previous);
 		else Reflect.deleteProperty(globalThis, "location");
 	}

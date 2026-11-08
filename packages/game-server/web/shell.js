@@ -28,6 +28,10 @@ const state = {
 	connected: false,
 	me: null,
 	modes: [],
+	packs: { characterPacks: [], cardPacks: [] },
+	rooms: [],
+	watching: null,
+	candidates: {},
 	extensions: [],
 	room: null,
 	retry: 0,
@@ -87,6 +91,8 @@ function onMessage(msg) {
 			state.me = { uid: msg.uid, nickname: msg.nickname, avatar: msg.avatar };
 			state.modes = msg.modes ?? [];
 			state.extensions = msg.extensions ?? [];
+			state.packs = msg.packs ?? state.packs;
+			state.watching = null;
 			$("nickname").value = msg.nickname;
 			fillModeSelect($("createMode"), "identity");
 			// deep link /room/<code>
@@ -94,6 +100,9 @@ function onMessage(msg) {
 				const m = /^\/room\/(\d{6})$/.exec(location.pathname);
 				if (m && !state.room) send({ t: "room.join", code: m[1] });
 			}
+			break;
+		case "rooms":
+			state.rooms = msg.rooms;
 			break;
 		case "room":
 			state.room = msg.room;
@@ -287,6 +296,11 @@ function render() {
 	$("app").hidden = inGame && !state.showingMenu;
 	$("home").hidden = !!room || !state.me;
 	$("room").hidden = !room;
+	if (state.me && state.connected && state.watching !== !room) {
+		state.watching = !room;
+		send({ t: "rooms.watch", on: !room });
+	}
+	if (!room) renderRoomList();
 	if (room) renderRoom(room);
 	const ended = room?.status === "ended";
 	$("endbar").hidden = !(inGame && ended);
@@ -305,10 +319,7 @@ function renderRoom(room) {
 	const members = room.members
 		.map(m => {
 			const tags = [m.uid === room.ownerId ? "房主" : "", m.uid === me ? "我" : ""].filter(Boolean).join(" · ");
-			const ops =
-				isOwner && m.uid !== me
-					? `<button data-op="transfer" data-uid="${m.uid}">设为房主</button><button data-op="kick" data-uid="${m.uid}">移出</button>`
-					: "";
+			const ops = isOwner && m.uid !== me ? `<button data-op="transfer" data-uid="${m.uid}">设为房主</button><button data-op="kick" data-uid="${m.uid}">移出</button>` : "";
 			return `<li><span class="dot ${m.online ? "on" : ""}"></span><span class="name">${escapeHtml(m.nickname)}</span><span class="tag">${tags}</span>${ops}</li>`;
 		})
 		.join("");
@@ -324,37 +335,279 @@ function renderRoom(room) {
 	renderOptions(room, isOwner && !playing);
 }
 
+// Keep grouping precedence here: specific room/plugin/basic keys precede character rules.
+function optionSection(key) {
+	if (key.startsWith("plugin_")) return "插件";
+	if (["observe", "observe_handcard", "mount_combine", "public"].includes(key)) return "房间";
+	if (["player_number", "choose_timeout"].includes(key) || key.endsWith("_mode")) return "基本";
+	if (key.startsWith("choice_") || ["limit_zhu", "double_character", "change_identity", "change_choice"].includes(key) || key.includes("character")) return "选将";
+	return "规则";
+}
+
+const explanations = {
+	choose_timeout: "每次出牌或操作的等待时限，超时后由系统处理。",
+	observe: "允许其他玩家旁观本局游戏。",
+	observe_handcard: "允许旁观者查看手牌，开启前请与玩家确认。",
+	mount_combine: "合并坐骑装备栏，使进攻与防御坐骑共用一个栏位。",
+	public: "公开房间会出现在大厅房间列表中；关闭后仍可通过房间号或邀请链接加入。",
+	plugin_opening_hand_pick_enable: "开局时发出多组候选手牌，每位玩家选择其中一组，其余洗回牌堆。",
+	plugin_opening_hand_pick_timeout: "开局选择手牌的时限，超时由 AI 选择。",
+	characterPack: "选择本局可用的武将包，数字表示包内武将数量。",
+	cardPack: "选择加入牌堆的卡牌包，数字表示该包加入牌堆的张数。",
+	banned: "搜索武将名称或编号并添加禁用；禁用武将不会进入选将候选。",
+	bannedcards: "搜索卡牌名称或编号并添加禁用；禁用卡牌不会进入本局牌堆。",
+};
+for (const id of ["zhu", "zhong", "fan", "nei"]) explanations[`plugin_opening_hand_pick_n_${id}`] = "该身份的候选手牌组数；自动以基础 2 组、内奸 3 组计算，总用牌量超过牌堆 60% 时逐步减少。";
+
+function helpText(opt) {
+	return opt.intro || explanations[opt.key] || `设置本局的「${opt.name}」，由当前模式规则生效。`;
+}
+
+function addHelp(parent, text) {
+	parent.title = text;
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "help";
+	button.textContent = "?";
+	button.setAttribute("aria-label", "查看说明");
+	button.setAttribute("aria-expanded", "false");
+	const explanation = document.createElement("p");
+	explanation.className = "explanation";
+	explanation.textContent = text;
+	explanation.hidden = true;
+	button.onclick = () => {
+		explanation.hidden = !explanation.hidden;
+		button.setAttribute("aria-expanded", String(!explanation.hidden));
+	};
+	parent.append(button, explanation);
+}
+
+const patchConfig = config => send({ t: "room.config", config });
+const pileSize = room => state.packs.cardPacks.filter(p => room.config.cardPack?.includes(p.id)).reduce((n, p) => n + p.count, 0);
+
+function automaticGroups(room, info) {
+	// Source of truth: engine-host/src/plugins/opening-hand-pick.js defaultGroups().
+	const identities = ["zhu", "zhong", "fan", "nei"];
+	const seats = info?.identityTable?.[Number(room.config.player_number) - 2] ?? [];
+	const groups = { zhu: 2, zhong: 2, fan: 2, nei: 3 };
+	const counts = Object.fromEntries(identities.map(id => [id, seats.filter(seat => (identities.includes(seat) ? seat : "fan") === id).length]));
+	const cost = () => identities.reduce((sum, id) => sum + counts[id] * groups[id] * 4, 0);
+	while (cost() > Math.floor(pileSize(room) * 0.6)) {
+		const candidates = ["nei", "fan", "zhong", "zhu"].filter(id => counts[id] && groups[id] > 1).sort((a, b) => groups[b] - groups[a]);
+		if (!candidates.length) break;
+		groups[candidates[0]]--;
+	}
+	return groups;
+}
+
+function optionRow(opt, room, editable, groups) {
+	const row = document.createElement("div");
+	row.className = "option-row";
+	const label = document.createElement("label");
+	label.textContent = opt.name;
+	const value = room.config[opt.key] ?? opt.init;
+	let input;
+	if (typeof opt.init === "boolean") {
+		label.className = "check";
+		input = document.createElement("input");
+		input.type = "checkbox";
+		input.checked = !!value;
+	} else if (opt.item) {
+		input = document.createElement("select");
+		for (const [v, name] of Object.entries(opt.item)) {
+			const id = opt.key.match(/^plugin_opening_hand_pick_n_(zhu|zhong|fan|nei)$/)?.[1];
+			input.add(new Option(v === "auto" && id ? `自动（${groups[id]}）` : name, v));
+		}
+		input.value = String(value);
+	} else {
+		input = document.createElement("input");
+		input.value = value ?? "";
+	}
+	input.dataset.key = opt.key;
+	input.disabled = !editable;
+	input.onchange = () => patchConfig({ [opt.key]: input.type === "checkbox" ? input.checked : typeof opt.init === "number" ? Number(input.value) : input.value });
+	label.append(input);
+	row.append(label);
+	addHelp(row, helpText(opt));
+	return row;
+}
+
+function section(title) {
+	const el = document.createElement("section");
+	el.className = "settings-section";
+	const heading = document.createElement("h3");
+	heading.textContent = title;
+	el.append(heading);
+	return el;
+}
+
 function renderOptions(room, editable) {
 	const info = state.modes.find(m => m.id === room.mode);
 	const box = $("options");
-	const key = JSON.stringify([room.mode, room.config, editable]);
+	const key = JSON.stringify([room.mode, room.config, editable, Object.keys(state.candidates)]);
 	if (box.dataset.key === key) return;
+	const open = new Set([...box.querySelectorAll("details[open]")].map(d => d.dataset.section));
 	box.dataset.key = key;
-	box.innerHTML = "";
-	for (const opt of info?.options ?? []) {
-		const value = room.config[opt.key] ?? opt.init;
-		let el;
-		if (typeof opt.init === "boolean") {
-			el = document.createElement("label");
-			el.className = "check";
-			el.innerHTML = `<input type="checkbox" ${value ? "checked" : ""} ${editable ? "" : "disabled"} /> ${escapeHtml(opt.name)}`;
-			el.querySelector("input").onchange = e => send({ t: "room.config", config: { [opt.key]: e.target.checked } });
-		} else if (opt.item) {
-			el = document.createElement("label");
-			el.innerHTML = `${escapeHtml(opt.name)}<select ${editable ? "" : "disabled"}>${Object.entries(opt.item)
-				.map(([v, l]) => `<option value="${escapeHtml(v)}" ${String(value) === v ? "selected" : ""}>${escapeHtml(l)}</option>`)
-				.join("")}</select>`;
-			el.querySelector("select").onchange = e => send({ t: "room.config", config: { [opt.key]: e.target.value } });
-		} else {
-			el = document.createElement("label");
-			el.innerHTML = `${escapeHtml(opt.name)}<input value="${escapeHtml(value)}" ${editable ? "" : "disabled"} />`;
-			el.querySelector("input").onchange = e => {
-				const v = e.target.value;
-				send({ t: "room.config", config: { [opt.key]: typeof opt.init === "number" ? Number(v) : v } });
-			};
+	box.replaceChildren();
+	const groups = automaticGroups(room, info);
+	const options = [...(info?.options ?? []), { key: "public", name: "公开房间", init: true }];
+	for (const name of ["基本", "选将", "规则", "武将与卡牌", "房间", "插件"]) {
+		const opts = options.filter(opt => optionSection(opt.key) === name);
+		if (!opts.length && name !== "武将与卡牌") continue;
+		const card = section(name);
+		box.append(card);
+		if (name === "武将与卡牌") {
+			renderPacks(card, room, editable);
+			continue;
 		}
-		if (opt.intro) el.title = opt.intro;
-		box.appendChild(el);
+		if (name === "插件") {
+			for (const enable of opts.filter(o => o.key.endsWith("_enable"))) {
+				const prefix = enable.key.slice(0, -6);
+				const plugin = document.createElement("div");
+				plugin.className = "plugin";
+				plugin.append(optionRow(enable, room, editable, groups));
+				if (prefix === "plugin_opening_hand_pick_") {
+					const summary = document.createElement("p");
+					summary.className = "muted small";
+					summary.textContent = `当前人数下：主公 ${groups.zhu} · 忠臣 ${groups.zhong} · 反贼 ${groups.fan} · 内奸 ${groups.nei}`;
+					plugin.append(summary);
+				}
+				const enabled = room.config[enable.key] ?? enable.init;
+				const body = document.createElement("div");
+				body.className = `option-grid ${enabled ? "" : "plugin-disabled"}`;
+				for (const opt of opts.filter(o => o !== enable && o.key.startsWith(prefix))) body.append(optionRow(opt, room, editable && enabled, groups));
+				plugin.append(body);
+				card.append(plugin);
+			}
+			continue;
+		}
+		const grid = document.createElement("div");
+		grid.className = "option-grid";
+		const more = document.createElement("details");
+		more.dataset.section = name;
+		more.open = open.has(name);
+		more.innerHTML = '<summary>更多设置</summary><div class="option-grid"></div>';
+		for (const opt of opts) (name === "房间" || opt.frequent ? grid : more.lastElementChild).append(optionRow(opt, room, editable, groups));
+		card.append(grid);
+		if (more.lastElementChild.childElementCount) card.append(more);
+	}
+}
+
+function chip(text, active, editable, action) {
+	const el = document.createElement(editable ? "button" : "span");
+	el.className = `chip ${active ? "selected" : ""}`;
+	el.textContent = text;
+	if (editable) {
+		el.type = "button";
+		el.setAttribute("aria-pressed", String(active));
+		el.onclick = action;
+	}
+	return el;
+}
+
+function renderPacks(card, room, editable) {
+	for (const [key, title, packs] of [
+		["characterPack", "武将包", state.packs.characterPacks],
+		["cardPack", "卡牌包", state.packs.cardPacks],
+	]) {
+		const block = document.createElement("div");
+		block.className = "pack-block";
+		block.innerHTML = `<h4>${title}</h4>`;
+		addHelp(block, explanations[key]);
+		const chips = document.createElement("div");
+		chips.className = "chips";
+		const selected = room.config[key] ?? [];
+		for (const p of packs) {
+			if (!editable && !selected.includes(p.id)) continue;
+			chips.append(chip(`${p.name} · ${p.count}`, selected.includes(p.id), editable, () => patchConfig({ [key]: selected.includes(p.id) ? selected.filter(id => id !== p.id) : [...selected, p.id] })));
+		}
+		block.append(chips);
+		card.append(block);
+	}
+	const count = document.createElement("p");
+	count.textContent = `牌堆：${pileSize(room)} 张`;
+	count.className = "pile-count";
+	card.append(count);
+	for (const [key, title, kind] of [
+		["banned", "禁用武将", "characters"],
+		["bannedcards", "禁用卡牌", "cards"],
+	]) {
+		const block = document.createElement("div");
+		block.className = "ban-picker";
+		block.innerHTML = `<h4>${title}</h4>`;
+		addHelp(block, explanations[key]);
+		const selected = room.config[key] ?? [];
+		const candidates = state.candidates[kind];
+		const names = new Map(candidates?.map(c => [c.id, c.name]));
+		const chips = document.createElement("div");
+		chips.className = "chips";
+		for (const id of selected) chips.append(chip(`${names.get(id) || id}${editable ? " ×" : ""}`, true, editable, () => patchConfig({ [key]: selected.filter(v => v !== id) })));
+		if (!selected.length) chips.textContent = "暂无禁用";
+		block.append(chips);
+		if (!candidates && !state.candidates[`${kind}Loading`]) {
+			state.candidates[`${kind}Loading`] = true;
+			fetch(`/api/catalog/${kind}`)
+				.then(r => {
+					if (!r.ok) throw new Error();
+					return r.json();
+				})
+				.then(list => {
+					state.candidates[kind] = list;
+					render();
+				})
+				.catch(() => {
+					delete state.candidates[`${kind}Loading`];
+					toast("禁用目录加载失败，请重新进入房间重试");
+				});
+		}
+		if (editable) {
+			const input = document.createElement("input");
+			input.type = "search";
+			input.placeholder = candidates ? "搜索名称或编号" : "正在加载目录…";
+			input.setAttribute("aria-label", `搜索${title}`);
+			input.disabled = !candidates;
+			const results = document.createElement("div");
+			results.className = "ban-results";
+			input.oninput = () => {
+				results.replaceChildren();
+				const query = input.value.trim().toLowerCase();
+				if (!query) return;
+				const matches = candidates.filter(c => !selected.includes(c.id) && `${c.id} ${c.name}`.toLowerCase().includes(query));
+				const unique = [...new Map(matches.map(c => [c.id, c])).values()];
+				for (const c of unique.slice(0, 40)) {
+					const button = document.createElement("button");
+					button.type = "button";
+					button.textContent = `${c.name} (${c.id}) · ${c.pack} ＋`;
+					button.onclick = () => patchConfig({ [key]: [...selected, c.id] });
+					results.append(button);
+				}
+				if (!unique.length) results.textContent = "无匹配结果";
+				else if (unique.length > 40) results.append(document.createTextNode("仅显示前 40 项，请继续输入缩小范围。"));
+			};
+			block.append(input, results);
+		}
+		card.append(block);
+	}
+}
+
+function renderRoomList() {
+	const box = $("roomList");
+	box.replaceChildren();
+	if (!state.rooms.length) {
+		box.textContent = "暂无公开房间，创建一个邀请大家加入吧。";
+		return;
+	}
+	for (const room of state.rooms) {
+		const row = document.createElement("div");
+		row.className = "room-list-row";
+		const text = document.createElement("div");
+		text.innerHTML = `<strong>${escapeHtml(room.modeName)}</strong> <span class="code">${escapeHtml(room.code)}</span><div class="muted small">${escapeHtml(room.ownerName)} · ${room.players}/${room.maxPlayers} 人 · ${room.status === "playing" ? "对局中" : "等待中"}</div>`;
+		const join = document.createElement("button");
+		join.textContent = "加入";
+		join.disabled = room.players >= room.maxPlayers || room.status === "playing";
+		join.onclick = () => send({ t: "room.join", code: room.code });
+		row.append(text, join);
+		box.append(row);
 	}
 }
 
