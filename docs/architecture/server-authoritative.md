@@ -187,7 +187,7 @@ CI：PR/推送跑 lint、测试、镜像构建；main 出 `:edge`；tag 出版�
 运行端到端测试：`pnpm build` 后在 `packages/game-server` 执行
 `E2E_DROP=1 E2E_KILL_OWNER=1 E2E_RESTART=1 E2E_SPEED=vvfast node test/e2e/browser-game.mjs`。
 
-### 8.1 隐藏信息脱敏（未实现，建议并入 P6）
+### 8.1 隐藏信息脱敏（未实现，维护者决定暂不做）
 
 客户端以 `lib.cardOL[cardid]` 缓存牌对象。若在转发层把他人手牌脱敏为空信息，该牌之后被公开（打出、展示）时客户端可能沿用缓存的空对象，出现空白牌面。需要逐类核对广播（`directgain`、`$draw`、`$give`、`lose`…）并在公开时补发真实信息，属于协议改造，适合与 P6 的"函数广播 → 具名消息"一起做。
 
@@ -202,4 +202,4 @@ CI：PR/推送跑 lint、测试、镜像构建；main 出 `:edge`；tag 出版�
 
 ### 8.3 旧服务端
 
-`packages/server`（旧中继服务）与其 Dockerfile 仍保留：旧版桌面/移动客户端的"联机大厅"仍依赖它。是否删除由维护者决定。
+旧中继服务 `packages/server` 已删除（维护者决定）。旧版客户端连接第三方中继大厅的能力仍在客户端代码中，但本仓库不再提供中继服务。
