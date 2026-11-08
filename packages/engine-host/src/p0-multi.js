@@ -11,7 +11,7 @@ const iv = setInterval(() => {
 	peakRss = Math.max(peakRss, process.memoryUsage().rss);
 }, 500);
 for (let i = 0; i < N; i++) {
-	const w = new Worker(path.join(here, "p0.js"), { execArgv: ["--import", path.join(here, "register.js")], stdout: true, env: { ...process.env } });
+	const w = new Worker(path.join(here, "p0.js"), { execArgv: ["--import", path.join(here, "runtime/register.js")], stdout: true, env: { ...process.env } });
 	w.stdout.on("data", d => {
 		for (const line of String(d).split("\n")) if (/GAME OVER|after gc|boot done|TIMEOUT/.test(line)) console.log(`[w${i}]`, line.slice(0, 140));
 	});
