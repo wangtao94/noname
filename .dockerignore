@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/dist-types
+.git
+.data
+data
+.agents
+.codex
+.aws
+**/*.heapsnapshot
+apps/electron
+apps/mobile
+**/.DS_Store
+**/*.log
+coverage

@@ -1,0 +1,20 @@
+services:
+    noname:
+        image: ghcr.io/wangtao94/noname:latest
+        ports:
+            - "8080:8080"
+        volumes:
+            - ./data:/data
+        restart: unless-stopped
+        # environment:
+        #   PORT: "8080"
+        #   NONAME_SERVE_WEB: "true"
+        #   NONAME_DATA_DIR: /data
+        #   NONAME_WEB_ROOT: /app/dist
+        #   NONAME_ASSET_ROOTS: /app/apps/core
+        #   NONAME_RECONNECT_GRACE: 60s
+        #   NONAME_ROOM_IDLE_TTL: 10m
+        #   NONAME_MAX_ROOMS: "0" # 自动估算
+        #   NONAME_TRUST_PROXY: "false"
+        #   NONAME_LOG_LEVEL: info
+        #   NONAME_GAME_SPEED: mid

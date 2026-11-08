@@ -1,0 +1,65 @@
+:root {
+	--bg: #f3efe6;
+	--fg: #2b2620;
+	--muted: #7a7064;
+	--card: #fffdf8;
+	--line: #e2d9c8;
+	--accent: #a8322d;
+	--accent-fg: #fff;
+	--ok: #3f8f4f;
+	color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #1d1a17;
+		--fg: #ece6dc;
+		--muted: #a59a8c;
+		--card: #27231f;
+		--line: #3a342d;
+		--accent: #d2564f;
+		color-scheme: dark;
+	}
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px max(16px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; font-size: 18px; letter-spacing: 0.05em; }
+.brand span { color: var(--accent); }
+.profile { display: flex; align-items: center; gap: 8px; }
+.conn { width: 10px; height: 10px; border-radius: 50%; background: #c9b8a0; }
+.conn.on { background: var(--ok); }
+.panel { max-width: 720px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
+.card h2 { margin: 0; font-size: 17px; }
+label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+input, select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.ghost { background: transparent; }
+button:disabled { opacity: 0.5; cursor: default; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; font-weight: 400; }
+.room-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.code { font-family: ui-monospace, monospace; letter-spacing: 0.15em; color: var(--accent); }
+.members { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.members li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.members li .dot { width: 8px; height: 8px; border-radius: 50%; background: #bbb; flex: none; }
+.members li .dot.on { background: var(--ok); }
+.members li .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.members li .tag { font-size: 12px; color: var(--accent); }
+.members li button { padding: 2px 8px; font-size: 12px; }
+.members li.empty { color: var(--muted); border-style: dashed; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.options { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.options label.check { display: flex; align-items: center; gap: 8px; color: var(--fg); }
+#stage, #frames { position: fixed; inset: 0; background: #000; }
+#frames iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; transition: opacity 0.35s; }
+#frames iframe.pending { opacity: 0; pointer-events: none; }
+.endbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.35); max-width: calc(100% - 32px); }
+.floating { position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); right: 8px; opacity: 0.6; padding: 4px 10px; font-size: 12px; }
+.floating:hover { opacity: 1; }
+.toast { position: fixed; left: 50%; top: calc(16px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 8px; z-index: 10; max-width: calc(100% - 32px); }
+#app.overlay { position: fixed; inset: 0; z-index: 5; overflow: auto; background: color-mix(in srgb, var(--bg) 94%, transparent); }
+.floating { z-index: 6; }

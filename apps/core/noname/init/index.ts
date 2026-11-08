@@ -7,6 +7,7 @@ import { security, initializeSandboxRealms } from "@/util/sandbox.js";
 import { CacheContext } from "@/library/cache/cacheContext.js";
 import { importCardPack, importCharacterPack, importExtension, importMode } from "./import.js";
 import { loadCard, loadCardPile, loadCharacter, loadExtension, loadMode, loadPlay } from "./loading.js";
+import { applyServerRoomConfig } from "./server-room.js";
 
 // 无名杀，启动！
 export async function boot() {
@@ -40,6 +41,8 @@ export async function boot() {
 	setOnError({ lib, game, get, _status });
 
 	await loadConfig();
+	// 服务端房间模式：大厅页以 ?sa-room= 打开本页，跳过启动页直接进入联机客户端
+	applyServerRoomConfig(lib, _status);
 
 	// 兼容原有鏖战布尔设置，保持原规则并正确显示新的选择菜单。
 	for (const mode of ["guozhan", "connect"]) {

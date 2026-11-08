@@ -4,9 +4,12 @@
 //   { t: "open", id }              a client connected (id is stable per user, reused on reconnect)
 //   { t: "msg", id, data }         raw message string from that client
 //   { t: "close", id }             client disconnected
+//   { t: "configure", mode, config } (pooled workers only) choose mode + room config, then boot into waiting
 //   { t: "begin" }                 start the game (leave the waiting state)
 // Worker -> main thread:
-//   { t: "ready" }                 engine booted and waiting for players
+//   { t: "booted" }                engine booted (pooled workers: waiting for "configure")
+//   { t: "ready" }                 mode loaded and waiting for players
+//   { t: "joined", id }            a client finished the handshake (inited)
 //   { t: "send", id, data }        raw message string for a client
 //   { t: "kick", id }              host asked to close a client
 //   { t: "config", config }        room config (lib.configOL) changed
@@ -16,7 +19,11 @@ import { parentPort, workerData } from "node:worker_threads";
 import { bootEngine } from "../runtime/boot.js";
 import { installHostOverrides, defaultConfigOL } from "./overrides.js";
 
-const { roomId = "room", mode = "identity", config: configPatch = {}, preset = {} } = workerData ?? {};
+const { roomId = "room", preset = {} } = workerData ?? {};
+let { mode, config: configPatch = {} } = workerData ?? {};
+/** pooled worker: mode/config arrive later via "configure" */
+let resolveConfigure;
+const configured = mode ? Promise.resolve() : new Promise(resolve => (resolveConfigure = resolve));
 const post = msg => parentPort.postMessage(msg);
 const log = (...args) => post({ t: "log", args: args.map(a => (typeof a === "string" ? a : a instanceof Error ? a.stack : safe(a))) });
 function safe(v) {
@@ -34,7 +41,7 @@ const pending = [];
 
 engine = await bootEngine({
 	log,
-	preset: { new_tutorial: true, mode: "connect", directstartmode: mode, ...preset },
+	preset: { new_tutorial: true, mode: "connect", directstartmode: "identity", ...preset },
 	beforeBoot: ({ lib, game, get, _status, ui }) => {
 		lib.node = {};
 		game.onlineroom = true;
@@ -58,16 +65,59 @@ engine = await bootEngine({
 		// connect mode builds the whole connect menu UI before switching modes; the server never shows it.
 		ui.create.menu = () => {};
 		const switchMode = game.switchMode;
-		game.switchMode = function (name, configx) {
+		game.switchMode = function (_name, configx) {
 			// configx path of switchMode copies every key into lib.configOL (instead of reading local menu config)
-			return switchMode.call(this, name, configx ?? { ...defaultConfigOL(lib, name), ...configPatch, mode: name });
+			configured.then(() => switchMode.call(this, mode, configx ?? { ...defaultConfigOL(lib, mode), ...configPatch, mode }));
 		};
 		installHostOverrides({ lib, game, get, _status, ui });
+		const inited = lib.message.server.inited;
+		lib.message.server.inited = function () {
+			inited.call(this);
+			post({ t: "joined", id: this.id });
+		};
+		const reinited = lib.message.server.reinited;
+		lib.message.server.reinited = function () {
+			reinited.call(this);
+			post({ t: "joined", id: this.id, reconnect: true });
+		};
 		lib.onover.push(() => post({ t: "over" }));
 	},
 });
 
 const { lib, game, _status } = engine;
+post({ t: "booted", catalog: modeCatalog(lib) });
+
+/** Connect-mode options of every mode that supports online play (drives the lobby's settings UI). */
+function modeCatalog(lib) {
+	const modes = [];
+	for (const [id, info] of Object.entries(lib.mode)) {
+		if (!info?.connect) continue;
+		const options = [];
+		for (const [key, cfg] of Object.entries(info.connect)) {
+			if (key === "update" || !key.startsWith("connect_") || !cfg || typeof cfg !== "object" || !("init" in cfg)) continue;
+			if (cfg.frequent === false && cfg.clear) continue;
+			let item = cfg.item;
+			if (typeof item === "function") {
+				try {
+					item = item();
+				} catch {
+					item = undefined;
+				}
+			}
+			const plain = v => (typeof v === "string" ? v.replace(/<[^>]+>/g, "") : String(v));
+			options.push({
+				key: key.slice(8),
+				name: plain(cfg.name ?? key),
+				init: cfg.init,
+				item: item && typeof item === "object" ? Object.fromEntries(Object.entries(item).map(([k, v]) => [k, plain(v)])) : undefined,
+				input: cfg.input ? true : undefined,
+				intro: typeof cfg.intro === "string" ? plain(cfg.intro) : undefined,
+			});
+		}
+		modes.push({ id, name: lib.translate[id] || info.name || id, options });
+	}
+	return modes;
+}
 
 // wait until the mode reached waitForPlayer
 const readyTimer = setInterval(() => {
@@ -97,6 +147,12 @@ function handle(m) {
 }
 
 parentPort.on("message", m => {
+	if (m.t === "configure") {
+		mode = m.mode;
+		configPatch = m.config ?? {};
+		resolveConfigure?.();
+		return;
+	}
 	if (!_status.waitingForPlayer && !game.players?.length && m.t !== "close") {
 		pending.push(m);
 		return;

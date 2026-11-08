@@ -1,0 +1,60 @@
+// Control-plane protocol between the lobby shell and the server (JSON over WebSocket /ws).
+// The game plane (/ws/game) carries the engine's own messages unchanged.
+
+export const PROTOCOL_VERSION = 1;
+
+export interface MemberView {
+	uid: string;
+	nickname: string;
+	avatar: string;
+	online: boolean;
+}
+
+export interface RoomView {
+	code: string;
+	ownerId: string;
+	mode: string;
+	config: Record<string, unknown>;
+	members: MemberView[];
+	status: "lobby" | "playing" | "ended";
+	/** current game (present while playing / ended) */
+	game?: { id: string; startedAt: number; endedAt?: number };
+	maxPlayers: number;
+}
+
+export interface ModeOption {
+	key: string;
+	name: string;
+	init: unknown;
+	/** select options: value -> label */
+	item?: Record<string, string>;
+	/** free text input */
+	input?: boolean;
+	intro?: string;
+}
+
+export interface ModeInfo {
+	id: string;
+	name: string;
+	options: ModeOption[];
+}
+
+export type ClientMsg =
+	| { t: "hello"; token: string; nickname?: string; avatar?: string }
+	| { t: "profile"; nickname?: string; avatar?: string }
+	| { t: "room.create"; mode?: string; config?: Record<string, unknown> }
+	| { t: "room.join"; code: string }
+	| { t: "room.leave" }
+	| { t: "room.config"; mode?: string; config?: Record<string, unknown> }
+	| { t: "room.kick"; uid: string }
+	| { t: "room.transfer"; uid: string }
+	| { t: "room.start" }
+	| { t: "room.restart" }
+	| { t: "room.back" }
+	| { t: "ping" };
+
+export type ServerMsg =
+	| { t: "welcome"; uid: string; nickname: string; avatar: string; version: number; serverVersion: string; modes: ModeInfo[] }
+	| { t: "room"; room: RoomView | null }
+	| { t: "error"; code: string; message: string }
+	| { t: "pong" };
