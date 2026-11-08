@@ -1,0 +1,16 @@
+{
+    "name": "@noname/engine-host",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "p0": "node --import ./src/register.js ./src/p0.js"
+    },
+    "dependencies": {
+        "@happy-dom/global-registrator": "^21.0.4",
+        "fake-indexeddb": "^6.2.7",
+        "happy-dom": "^21.0.4",
+        "linkedom": "^0.18.15",
+        "tsx": "^4.23.15"
+    }
+}
