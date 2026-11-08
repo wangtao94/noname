@@ -18,4 +18,14 @@ export function registerCatalogApi(app: FastifyInstance, rooms: RoomManager) {
 			return reply.type("application/json; charset=utf-8").send(body);
 		});
 	}
+	for (const kind of ["character", "card"] as const) {
+		app.get<{ Params: { id: string } }>(`/api/catalog/pack/${kind}/:id`, (req, reply) => {
+			if (!Object.hasOwn(rooms.packDetails[kind], req.params.id)) return reply.code(404).send({ message: "未知内容包" });
+			const body = JSON.stringify(rooms.packDetails[kind][req.params.id]);
+			const etag = `"${createHash("sha256").update(body).digest("hex")}"`;
+			reply.header("Cache-Control", "no-cache").header("ETag", etag);
+			if (req.headers["if-none-match"] === etag) return reply.code(304).send();
+			return reply.type("application/json; charset=utf-8").send(body);
+		});
+	}
 }

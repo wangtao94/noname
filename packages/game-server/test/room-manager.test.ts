@@ -1,3 +1,6 @@
+import { EventEmitter } from "node:events";
+import type { EngineWorker } from "../src/rooms/game-session.ts";
+import { beginnerPreset } from "../src/rooms/presets.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
@@ -20,7 +23,7 @@ test("room pack/ban defaults, validated arrays, caps and public boolean", async 
 	const rooms = fixture();
 	try {
 		const room = rooms.create(user("owner"));
-		assert.deepEqual(room.config, { player_number: "4", public: true, characterPack: ["standard"], cardPack: ["standard"], banned: [], bannedcards: [] });
+		assert.deepEqual(room.config, beginnerPreset({ player_number: "4", public: true }));
 		rooms.configure("owner", undefined, { characterPack: ["bad", "standard", 1, "standard"], cardPack: [], banned: ["c0", "bad", "c0"], bannedcards: ["sha", "bad"], public: false, unknown: [] });
 		assert.deepEqual(room.config.characterPack, ["standard"]);
 		assert.deepEqual(room.config.cardPack, []);
@@ -124,6 +127,85 @@ test("rooms.watch pushes immediately, coalesces changes to one per second, and s
 	} finally {
 		ws.terminate();
 		gateway.close();
+		await app.close();
+		await rooms.close();
+	}
+});
+
+test("beginner reset preserves valid seats and public, other changes select custom", async () => {
+	const rooms = fixture();
+	rooms.modes.push({ id: "single", name: "单挑", options: [{ key: "player_number", name: "人数", init: "2", item: { 2: "2", 12: "12" } }] });
+	try {
+		const room = rooms.create(user("owner"));
+		assert.equal(room.config.preset, "beginner");
+		rooms.configure("owner", undefined, { player_number: "2", public: false });
+		assert.equal(room.config.preset, "beginner");
+		rooms.configure("owner", undefined, { banned: ["c0"] });
+		assert.equal(room.config.preset, "custom");
+		rooms.configure("owner", undefined, { preset: "beginner" });
+		assert.deepEqual(room.config, beginnerPreset({ player_number: "2", public: false }));
+		rooms.configure("owner", undefined, { preset: "custom" });
+		assert.equal(room.config.preset, "custom");
+		rooms.configure("owner", "single", { player_number: "12" });
+		assert.equal(room.config.preset, "custom");
+		rooms.configure("owner", undefined, { preset: "beginner", banned: ["c0"] });
+		assert.equal(room.mode, "identity");
+		assert.equal(room.config.player_number, "4", "invalid identity count resets to default");
+		assert.equal(room.config.public, false);
+		assert.deepEqual(room.config.banned, []);
+		assert.equal(rooms.create(user("other"), "single").config.preset, "custom");
+	} finally {
+		await rooms.close();
+	}
+});
+
+test("start strips lobby keys and restart uses newly selected packs", async () => {
+	const rooms = fixture();
+	rooms.packs.characterPacks.push({ id: "other", name: "其他包", count: 10 });
+	const sent: { t: string; config: Record<string, unknown> }[] = [];
+	const engines: EventEmitter[] = [];
+	rooms.pool.take = async () => {
+		const events = new EventEmitter();
+		engines.push(events);
+		return { events, post: (m: { t: string; config: Record<string, unknown> }) => sent.push(m), terminate: async () => {} } as unknown as EngineWorker;
+	};
+	try {
+		const room = rooms.create(user("owner"));
+		await rooms.start("owner");
+		assert.equal(sent[0].config.preset, undefined);
+		assert.equal(sent[0].config.public, undefined);
+		assert.deepEqual(sent[0].config.cardPack, ["standard", "extra"]);
+		engines[0].emit("message", { t: "over" });
+		assert.equal(room.status, "ended");
+		rooms.configure("owner", undefined, { cardPack: ["standard"], characterPack: ["other"] });
+		await rooms.start("owner");
+		assert.equal(engines.length, 2);
+		assert.deepEqual(sent[1].config.cardPack, ["standard"]);
+		assert.deepEqual(sent[1].config.characterPack, ["other"]);
+		assert.equal(sent[1].config.preset, undefined);
+	} finally {
+		await rooms.close();
+	}
+});
+
+test("pack details are fetched separately with 200/404 and ETag", async () => {
+	const rooms = fixture();
+	rooms.packDetails = { character: { standard: [{ id: "caocao", name: "曹操", image: "/image/character/caocao.jpg", group: "魏", hp: "4/4", skills: [{ name: "奸雄", description: "获得伤害牌" }] }] }, card: { standard: [{ id: "sha", name: "杀", type: "基本", count: 30, description: "造成伤害" }] } };
+	const app = Fastify();
+	registerCatalogApi(app, rooms);
+	try {
+		for (const kind of ["character", "card"] as const) {
+			const url = `/api/catalog/pack/${kind}/standard`;
+			const response = await app.inject(url);
+			assert.equal(response.statusCode, 200);
+			assert.deepEqual(response.json(), rooms.packDetails[kind].standard);
+			assert.equal(response.headers["cache-control"], "no-cache");
+			assert.ok(response.headers.etag);
+			assert.equal((await app.inject({ url, headers: { "if-none-match": response.headers.etag! } })).statusCode, 304);
+			assert.equal((await app.inject(`/api/catalog/pack/${kind}/missing`)).statusCode, 404);
+			assert.equal((await app.inject(`/api/catalog/pack/${kind}/toString`)).statusCode, 404);
+		}
+	} finally {
 		await app.close();
 		await rooms.close();
 	}

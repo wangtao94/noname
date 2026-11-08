@@ -1,9 +1,9 @@
 // Keeps a few engine workers booted ahead of time so starting a game (or "play again") is instant.
-import type { PackCatalog, BanCandidate } from "../protocol.ts";
+import type { PackCatalog, PackDetails, BanCandidate } from "../protocol.ts";
 import { EngineWorker } from "./game-session.ts";
 
 export class WorkerPool {
-	assets?: PackCatalog & { characters: BanCandidate[]; cards: BanCandidate[] };
+	assets?: PackCatalog & { characters: BanCandidate[]; cards: BanCandidate[]; details: PackDetails };
 	#idle: EngineWorker[] = [];
 	#booting = 0;
 	#closed = false;

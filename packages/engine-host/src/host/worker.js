@@ -139,7 +139,39 @@ function packCatalog(lib) {
 	const cardPacks = lib.connectCardPack.map(id => ({ id, name: plain(lib.translate[id + "_card_config"] || id), count: lib.cardPackList[id]?.length ?? 0 }));
 	const candidates = (packs, contents) => packs.flatMap(({ id: pack }) => Object.keys(contents[pack] ?? {}).map(id => ({ id, name: plain(lib.translate[id] || id), pack })));
 	const defaults = defaultConfigOL(lib, "identity");
-	return { characterPacks, cardPacks, defaultCharacterPacks: defaults.characterPack, defaultCardPacks: defaults.cardPack, characters: candidates(characterPacks, lib.characterPack), cards: cardPacks.flatMap(({ id: pack }) => (lib.cardPack[pack] ?? []).map(id => ({ id, name: plain(lib.translate[id] || id), pack }))) };
+	const baseCard = id => (id === "huosha" || id === "leisha" ? "sha" : id);
+	const details = {
+		character: Object.fromEntries(
+			characterPacks.map(({ id: pack }) => [
+				pack,
+				Object.keys(lib.characterPack[pack] ?? {}).map(id => {
+					const c = lib.character[id] ?? lib.characterPack[pack][id];
+					const path = c.img || `image/character/${id}.jpg`;
+					return {
+						id,
+						name: plain(lib.translate[id] || id),
+						image: /^(https?:|data:|\/)/.test(path) ? path : `/${path.replace(/^ext:/, "extension/")}`,
+						group: plain(lib.translate[c.group] || c.group || c[1]),
+						hp: `${c.hp ?? c[2]}/${c.maxHp ?? c[2]}${c.hujia ? ` · 护甲 ${c.hujia}` : ""}`,
+						skills: (c.skills ?? c[3] ?? []).map(skill => ({ name: plain(lib.translate[skill] || skill), description: plain(lib.translate[skill + "_info"] || "暂无说明") })),
+					};
+				}),
+			])
+		),
+		card: Object.fromEntries(
+			cardPacks.map(({ id: pack }) => [
+				pack,
+				[...new Set([...(lib.cardPack[pack] ?? []), ...(lib.cardPackList[pack] ?? []).map(c => c[2])])].map(id => ({
+					id,
+					name: plain(lib.translate[id] || id),
+					type: plain(lib.translate[lib.card[baseCard(id)]?.type] || { basic: "基本", trick: "锦囊", delay: "延时锦囊", equip: "装备" }[lib.card[baseCard(id)]?.type] || "其他"),
+					count: (lib.cardPackList[pack] ?? []).filter(c => c[2] === id).length,
+					description: plain(lib.translate[id + "_info"] || lib.translate[baseCard(id) + "_info"] || "暂无说明"),
+				})),
+			])
+		),
+	};
+	return { details, characterPacks, cardPacks, defaultCharacterPacks: defaults.characterPack, defaultCardPacks: defaults.cardPack, characters: candidates(characterPacks, lib.characterPack), cards: cardPacks.flatMap(({ id: pack }) => (lib.cardPack[pack] ?? []).map(id => ({ id, name: plain(lib.translate[id] || id), pack }))) };
 }
 
 // wait until the mode reached waitForPlayer

@@ -157,7 +157,7 @@ await owner.page.click("#createBtn");
 const code = await waitFor(() => roomState(owner), 30000, "room created");
 say("room", code);
 // Select seats by the catalog key, independent of section order.
-await owner.page.selectOption('#options select[data-key="player_number"]', SEATS);
+await owner.page.click(`#options button[data-players="${SEATS}"]`);
 
 for (const p of players.slice(1)) {
 	await p.page.goto(`${base}/room/${code}`);
@@ -220,6 +220,7 @@ async function playOneGame(label) {
 	let nextDrop = Date.now() + 8000;
 	let nextReport = Date.now() + 30000;
 	const checkedExtensions = new Set();
+	let checkedPanel = false;
 	await waitFor(
 		async () => {
 			for (const p of players) {
@@ -244,6 +245,21 @@ async function playOneGame(label) {
 						say(`p${p.i} extensions verified`, JSON.stringify(loaded));
 					}
 				}
+			}
+			if (!checkedPanel && (await owner.page.locator("#menuBtn").isVisible()) && (await clientState(owner))?.players) {
+				checkedPanel = true;
+				await owner.page.locator("#menuBtn").click();
+				await owner.page.locator("#returnGame").waitFor({ state: "visible" });
+				assert.equal(await owner.page.locator("#menuBtn").textContent(), "返回对局");
+				assert.match(await owner.page.locator("#settingsNote").textContent(), /对局进行中/);
+				const fs = await import("node:fs/promises");
+				await fs.mkdir("/tmp/claude-1000/ui-shots-2", { recursive: true });
+				await owner.page.screenshot({ path: "/tmp/claude-1000/ui-shots-2/in-game-room-panel.png" });
+				await owner.page.keyboard.press("Escape");
+				assert.equal(await owner.page.locator("#app").isVisible(), false);
+				await owner.page.locator("#menuBtn").click();
+				await owner.page.locator("#app").click({ position: { x: 1, y: 1 } });
+				assert.equal(await owner.page.locator("#app").isVisible(), false);
 			}
 			if (Date.now() > nextReport) {
 				nextReport = Date.now() + 30000;

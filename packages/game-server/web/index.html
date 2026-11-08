@@ -23,10 +23,11 @@
 				</section>
 				<section class="card">
 					<h2>创建房间</h2>
-					<label
-						>模式
-						<select id="createMode"></select
-					></label>
+					<p class="muted">从推荐身份局开始，邀请朋友或与 AI 一起熟悉规则。</p>
+					<details>
+						<summary>其他模式</summary>
+						<label>模式<select id="createMode"></select></label>
+					</details>
 					<button id="createBtn" class="primary">创建房间</button>
 				</section>
 				<section class="card">
@@ -38,6 +39,7 @@
 			</main>
 
 			<main id="room" class="panel" hidden>
+				<button id="returnGame" class="primary" hidden>返回对局</button>
 				<section class="card">
 					<div class="room-head">
 						<h2>房间 <span id="roomCode" class="code"></span></h2>
@@ -52,10 +54,15 @@
 				</section>
 				<section class="card">
 					<h2>房间设置 <span id="settingsNote" class="muted small"></span></h2>
-					<label
-						>模式
-						<select id="roomMode"></select
-					></label>
+					<div id="presetSwitch" class="segmented" role="group" aria-label="配置方案"><button id="beginnerPreset">推荐配置（新手）</button><button id="customPreset">自定义</button></div>
+					<div id="presetConfirm" class="callout" hidden>
+						将恢复推荐配置，当前自定义设置会被覆盖
+						<div class="actions"><button id="confirmPreset" class="primary">恢复推荐配置</button><button id="cancelPreset">取消</button></div>
+					</div>
+					<div id="customMode">
+						<label>模式<select id="roomMode"></select></label>
+						<p id="modeExplanation" class="muted"></p>
+					</div>
 					<p id="serverExtensions" class="muted small"></p>
 					<div id="options" class="options"></div>
 				</section>
@@ -92,6 +99,16 @@
 			</div>
 		</div>
 
+		<div id="packPreview" class="modal" hidden>
+			<section class="preview-sheet" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+				<div class="room-head">
+					<h2 id="previewTitle"></h2>
+					<button id="closePreview">关闭</button>
+				</div>
+				<input id="previewSearch" type="search" placeholder="搜索名称、编号或技能" aria-label="搜索包内容" />
+				<div id="previewContent"></div>
+			</section>
+		</div>
 		<div id="toast" class="toast" hidden></div>
 		<script type="module" src="/shell/shell.js"></script>
 	</body>
