@@ -189,7 +189,7 @@
 	],
 	"moderned_modes": ["guozhan"],
 	"connect_characters": ["diy"],
-	"connect_cards": ["huodong", "guozhan", "sp", "zhulu", "yingbian", "yongjian", "xianxia"],
+	"connect_cards": ["huodong", "guozhan", "sp", "zhulu", "yingbian", "yongjian", "xianxia", "jiubian"],
 	"plays": [],
 	"extensions": [],
 	"banned": [],

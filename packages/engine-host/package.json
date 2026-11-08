@@ -4,7 +4,8 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "p0": "node --expose-gc --import ./src/runtime/register.js ./src/p0.js"
+        "p0": "node --expose-gc --import ./src/runtime/register.js ./src/p0.js",
+        "test": "node --import tsx --test test/*.test.js"
     },
     "dependencies": {
         "@happy-dom/global-registrator": "^21.0.4",

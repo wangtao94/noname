@@ -16,8 +16,9 @@
 //   { t: "over" }                  game finished
 //   { t: "log", args }             diagnostics
 import { parentPort, workerData } from "node:worker_threads";
+import { injectPluginOptions, installPluginActivation } from "../plugins/index.js";
 import { bootEngine } from "../runtime/boot.js";
-import { installHostOverrides, defaultConfigOL } from "./overrides.js";
+import { installHostOverrides, defaultConfigOL, ensureCommonConnectOptions } from "./overrides.js";
 
 const { roomId = "room", preset = {} } = workerData ?? {};
 let { mode, config: configPatch = {} } = workerData ?? {};
@@ -42,7 +43,8 @@ const pending = [];
 engine = await bootEngine({
 	log,
 	preset: { new_tutorial: true, mode: "connect", directstartmode: "identity", ...preset },
-	beforeBoot: ({ lib, game, get, _status, ui }) => {
+	beforeBoot: engine => {
+		const { lib, game, get, _status, ui } = engine;
 		lib.node = {};
 		game.onlineroom = true;
 		game.roomId = roomId;
@@ -67,9 +69,16 @@ engine = await bootEngine({
 		const switchMode = game.switchMode;
 		game.switchMode = function (_name, configx) {
 			// configx path of switchMode copies every key into lib.configOL (instead of reading local menu config)
-			configured.then(() => switchMode.call(this, mode, configx ?? { ...defaultConfigOL(lib, mode), ...configPatch, mode }));
+			configured.then(() => {
+				// Server plugins: activate after configOL is filled, before mode start content.
+				installPluginActivation(engine, mode);
+				return switchMode.call(this, mode, configx ?? { ...defaultConfigOL(lib, mode), ...configPatch, mode });
+			});
 		};
 		installHostOverrides({ lib, game, get, _status, ui });
+		ensureCommonConnectOptions(lib);
+		// Server plugins: expose options through the existing connect catalog.
+		injectPluginOptions(lib);
 		const inited = lib.message.server.inited;
 		lib.message.server.inited = function () {
 			inited.call(this);

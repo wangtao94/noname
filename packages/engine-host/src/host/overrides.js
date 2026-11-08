@@ -96,8 +96,10 @@ export function defaultConfigOL(lib, mode) {
 		if (key === "update" || !cfg || typeof cfg !== "object" || !("init" in cfg)) continue;
 		config[key.slice(8)] = cfg.init;
 	}
-	config.characterPack = lib.connectCharacterPack.slice(0);
-	config.cardPack = lib.connectCardPack.slice(0);
+	// same defaults as Game#switchMode without configx: all connect packs minus the ones disabled in config
+	// (game/config.json connect_characters / connect_cards, e.g. the guozhan card pack in identity games)
+	config.characterPack = lib.connectCharacterPack.filter(p => !(lib.config.connect_characters ?? []).includes(p));
+	config.cardPack = lib.connectCardPack.filter(p => !(lib.config.connect_cards ?? []).includes(p));
 	config.banned = [];
 	config.bannedcards = [];
 	return config;
